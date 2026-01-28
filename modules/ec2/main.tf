@@ -44,6 +44,9 @@ resource "aws_instance" "main" {
   vpc_security_group_ids      = var.security_group_ids
   associate_public_ip_address = true
 
+  # 환경 설정 스크립트 (첫 부팅 시 실행)
+  user_data = var.user_data != "" ? var.user_data : null
+
   root_block_device {
     volume_size           = var.root_volume_size
     volume_type           = "gp3"

@@ -96,3 +96,18 @@ variable "create_eip" {
   type        = bool
   default     = true
 }
+
+variable "run_setup_script" {
+  description = "EC2 시작 시 환경 설정 스크립트 실행 여부"
+  type        = bool
+  default     = true
+}
+
+#==============================================================================
+# Route 53 설정
+#==============================================================================
+variable "domain_name" {
+  description = "도메인 이름 (예: billages.com)"
+  type        = string
+  default     = ""
+}

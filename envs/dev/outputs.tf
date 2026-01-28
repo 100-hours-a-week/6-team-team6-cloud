@@ -62,3 +62,16 @@ output "ssh_command" {
   description = "SSH 접속 명령어"
   value       = "ssh -i <your-key.pem> ubuntu@${module.ec2_main.elastic_ip != null ? module.ec2_main.elastic_ip : module.ec2_main.instance_public_ip}"
 }
+
+#==============================================================================
+# 도메인 정보
+#==============================================================================
+output "domain_url" {
+  description = "서비스 도메인 URL"
+  value       = var.domain_name != "" ? "https://${var.env}.${var.domain_name}" : null
+}
+
+output "ssl_setup_command" {
+  description = "SSL 설정 명령어 (서버에서 실행)"
+  value       = var.domain_name != "" ? "sudo /opt/billage/scripts/setup-ssl.sh ${var.env}.${var.domain_name}" : null
+}
