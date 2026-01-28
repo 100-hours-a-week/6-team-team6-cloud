@@ -42,12 +42,34 @@ module "ec2_main" {
   subnet_id          = module.vpc.public_subnet_id
   security_group_ids = [module.security_group.main_sg_id]
   root_volume_size   = var.root_volume_size
-  
+
   # 키페어 설정 (둘 중 하나 선택)
   create_key_pair   = var.create_key_pair
   public_key        = var.public_key
   existing_key_name = var.existing_key_name
-  
+
   # Elastic IP 생성 (고정 IP 필요 시)
   create_eip = var.create_eip
+
+  # 환경 설정 스크립트 (첫 부팅 시 자동 실행)
+  user_data = var.run_setup_script ? file("${path.module}/../../scripts/setup.sh") : ""
+}
+
+#==============================================================================
+# Route 53 - DNS 레코드
+#==============================================================================
+# 기존 Hosted Zone 조회 (billages.com)
+data "aws_route53_zone" "main" {
+  count = var.domain_name != "" ? 1 : 0
+  name  = var.domain_name
+}
+
+# dev.billages.com -> Elastic IP
+resource "aws_route53_record" "dev" {
+  count   = var.domain_name != "" && var.create_eip ? 1 : 0
+  zone_id = data.aws_route53_zone.main[0].zone_id
+  name    = "${var.env}.${var.domain_name}"
+  type    = "A"
+  ttl     = 300
+  records = [module.ec2_main.elastic_ip]
 }

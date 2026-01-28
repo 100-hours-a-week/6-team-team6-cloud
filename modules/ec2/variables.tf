@@ -55,3 +55,9 @@ variable "create_eip" {
   type        = bool
   default     = true  # 고정 IP 필요 시 true
 }
+
+variable "user_data" {
+  description = "EC2 인스턴스 시작 시 실행할 스크립트"
+  type        = string
+  default     = ""
+}
