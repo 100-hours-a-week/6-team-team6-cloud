@@ -1,0 +1,73 @@
+name: Terraform CI
+
+on:
+  pull_request:
+    paths:
+      - 'envs/**'
+      - 'modules/**'
+
+jobs:
+  ci-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.0
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init (Dev)
+        working-directory: ./envs/dev
+        run: terraform init -backend=false
+
+      - name: Terraform Validate (Dev)
+        working-directory: ./envs/dev
+        run: terraform validate
+
+      - uses: terraform-linters/setup-tflint@v4
+
+      - name: Run TFLint (Dev)
+        working-directory: ./envs/dev
+        run: |
+          tflint --init
+          tflint
+
+      - name: Checkov Security Scan (Dev)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: envs/dev/
+          soft_fail: true
+
+  ci-prod:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.0
+
+      - name: Terraform Init (Prod)
+        working-directory: ./envs/prod
+        run: terraform init -backend=false
+
+      - name: Terraform Validate (Prod)
+        working-directory: ./envs/prod
+        run: terraform validate
+
+      - uses: terraform-linters/setup-tflint@v4
+
+      - name: Run TFLint (Prod)
+        working-directory: ./envs/prod
+        run: |
+          tflint --init
+          tflint
+
+      - name: Checkov Security Scan (Prod)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: envs/prod/
+          soft_fail: true
