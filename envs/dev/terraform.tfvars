@@ -47,3 +47,14 @@ create_eip = true
 # Route 53 설정
 #==============================================================================
 domain_name = "billages.com"
+
+#==============================================================================
+# Monitoring 설정
+#==============================================================================
+monitoring_instance_type    = "t4g.small"   # 2 vCPU, 2GB RAM
+monitoring_root_volume_size = 30            # GB
+create_monitoring_eip       = true
+
+# 모니터링 UI 접근 제한 (Grafana, Prometheus)
+monitoring_allowed_cidr = ["0.0.0.0/0"]  # 개발 단계
+# monitoring_allowed_cidr = ["123.123.123.123/32"]  # 운영: 관리자 IP만

@@ -111,3 +111,30 @@ variable "domain_name" {
   type        = string
   default     = ""
 }
+
+#==============================================================================
+# Monitoring 설정
+#==============================================================================
+variable "monitoring_instance_type" {
+  description = "모니터링 서버 EC2 인스턴스 타입"
+  type        = string
+  default     = "t4g.small"  # ARM 기반, 2 vCPU, 2GB RAM
+}
+
+variable "monitoring_root_volume_size" {
+  description = "모니터링 서버 루트 볼륨 크기 (GB)"
+  type        = number
+  default     = 30  # Prometheus data, Loki logs 고려
+}
+
+variable "create_monitoring_eip" {
+  description = "모니터링 서버 Elastic IP 생성 여부"
+  type        = bool
+  default     = true
+}
+
+variable "monitoring_allowed_cidr" {
+  description = "모니터링 UI 접근 허용 CIDR (Grafana, Prometheus)"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]  # 개발 단계, 운영 시 관리자 IP로 제한
+}

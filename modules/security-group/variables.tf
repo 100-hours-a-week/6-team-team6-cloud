@@ -15,6 +15,11 @@ variable "vpc_id" {
   type        = string
 }
 
+variable "vpc_cidr" {
+  description = "VPC CIDR 블록"
+  type        = string
+}
+
 variable "ssh_allowed_cidr" {
   description = "SSH 접근 허용 CIDR (보안을 위해 특정 IP 권장)"
   type        = list(string)
@@ -25,4 +30,10 @@ variable "db_allowed_cidr" {
   description = "DB 접근 허용 CIDR"
   type        = list(string)
   default     = ["0.0.0.0/0"]  # 개발 단계, 운영 시 VPC CIDR로 제한 권장
+}
+
+variable "monitoring_allowed_cidr" {
+  description = "Monitoring UI 접근 허용 CIDR (Grafana, Prometheus)"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]  # 개발 단계, 운영 시 관리자 IP로 제한 권장
 }

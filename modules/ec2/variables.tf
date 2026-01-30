@@ -10,6 +10,18 @@ variable "env" {
   type        = string
 }
 
+variable "instance_name" {
+  description = "인스턴스 이름 (예: main-server, monitoring-server)"
+  type        = string
+  default     = "main-server"
+}
+
+variable "instance_role" {
+  description = "인스턴스 역할 (예: main-server, monitoring-target, monitoring-server)"
+  type        = string
+  default     = "main-server"
+}
+
 variable "instance_type" {
   description = "EC2 인스턴스 타입"
   type        = string
@@ -58,6 +70,18 @@ variable "create_eip" {
 
 variable "user_data" {
   description = "EC2 인스턴스 시작 시 실행할 스크립트"
+  type        = string
+  default     = ""
+}
+
+variable "additional_tags" {
+  description = "추가 태그"
+  type        = map(string)
+  default     = {}
+}
+
+variable "iam_instance_profile" {
+  description = "IAM Instance Profile 이름"
   type        = string
   default     = ""
 }
