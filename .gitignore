@@ -56,4 +56,8 @@ Thumbs.db
 credentials
 .aws/
 
+# Monitoring - 환경변수 및 민감 정보
+monitoring/**/.env
+monitoring/**/exporter.cnf
+monitoring/**/init_exporter.sql
 /context

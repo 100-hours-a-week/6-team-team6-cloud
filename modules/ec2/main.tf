@@ -43,6 +43,7 @@ resource "aws_instance" "main" {
   subnet_id                   = var.subnet_id
   vpc_security_group_ids      = var.security_group_ids
   associate_public_ip_address = true
+  iam_instance_profile        = var.iam_instance_profile != "" ? var.iam_instance_profile : null
 
   # 환경 설정 스크립트 (첫 부팅 시 실행)
   user_data = var.user_data != "" ? var.user_data : null
@@ -70,12 +71,15 @@ resource "aws_instance" "main" {
   # 인스턴스 종료 방지 (운영 환경에서 활성화)
   disable_api_termination = var.env == "prod" ? true : false
 
-  tags = {
-    Name        = "${var.project_name}-${var.env}-main-server"
-    Environment = var.env
-    Project     = var.project_name
-    Role        = "main-server"
-  }
+  tags = merge(
+    {
+      Name        = "${var.project_name}-${var.env}-${var.instance_name}"
+      Environment = var.env
+      Project     = var.project_name
+      Role        = var.instance_role
+    },
+    var.additional_tags
+  )
 
   # Credit Specification for T-series (burstable)
   credit_specification {
