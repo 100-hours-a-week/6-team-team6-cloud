@@ -13,6 +13,12 @@ variable "project_name" {
   default     = "billage"
 }
 
+variable "aws_region" {
+  description = "AWS region for dashboard widgets"
+  type        = string
+  default     = "ap-northeast-2"
+}
+
 # -----------------------------------------------------------------------------
 # EC2 Monitoring
 # -----------------------------------------------------------------------------

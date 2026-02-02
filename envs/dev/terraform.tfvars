@@ -52,11 +52,10 @@ domain_name = "billages.com"
 # CloudWatch 모니터링 설정
 #==============================================================================
 # 이메일 알림 (필수)
-alarm_email = "your-email@example.com"  # TODO: 실제 이메일로 변경
-
+alarm_email = "your-email@example.com"
 # Discord 알림 (선택)
-enable_discord      = false
-discord_webhook_url = ""  # Discord 채널 설정 > 연동 > 웹후크에서 생성
+enable_discord      = true
+discord_webhook_url = "https://discord.com/api/webhooks/1467743094194569448/52rWCykO6Rpq2IPn7MWTpNHJqMMEsvOXK3cECr62xsk4ifMNxYfKfn4nW7xjs7chCnHZ"
 
 # CPU 알람 임계값 (%)
 cpu_threshold = 80
