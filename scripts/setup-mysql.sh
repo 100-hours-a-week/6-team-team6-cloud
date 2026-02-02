@@ -59,7 +59,7 @@ else
     read -sp "MySQL root 비밀번호: " MYSQL_ROOT_PASSWORD
     echo ""
     MYSQL_CMD="mysql -u root -p$MYSQL_ROOT_PASSWORD"
-fi
+fi1
 
 echo ""
 echo "[2/4] 데이터베이스 생성..."
