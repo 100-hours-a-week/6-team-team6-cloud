@@ -60,3 +60,14 @@ discord_webhook_url = ""  # Discord 채널 설정 > 연동 > 웹후크에서 생
 
 # CPU 알람 임계값 (%)
 cpu_threshold = 80
+
+#==============================================================================
+# Monitoring 설정
+#==============================================================================
+monitoring_instance_type    = "t4g.small"   # 2 vCPU, 2GB RAM
+monitoring_root_volume_size = 30            # GB
+create_monitoring_eip       = true
+
+# 모니터링 UI 접근 제한 (Grafana, Prometheus)
+monitoring_allowed_cidr = ["0.0.0.0/0"]  # 개발 단계
+# monitoring_allowed_cidr = ["123.123.123.123/32"]  # 운영: 관리자 IP만

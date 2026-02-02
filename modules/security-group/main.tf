@@ -89,3 +89,124 @@ resource "aws_security_group" "main" {
     create_before_destroy = true
   }
 }
+
+#==============================================================================
+# Monitoring Server Security Group
+#==============================================================================
+resource "aws_security_group" "monitoring" {
+  name        = "${var.project_name}-${var.env}-monitoring-sg"
+  description = "Security group for monitoring server (Prometheus, Grafana, Loki)"
+  vpc_id      = var.vpc_id
+
+  # SSH - 관리용
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = var.ssh_allowed_cidr
+  }
+
+  # Grafana - 관리자 접근
+  ingress {
+    description = "Grafana"
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = var.monitoring_allowed_cidr
+  }
+
+  # Prometheus - 관리자 접근
+  ingress {
+    description = "Prometheus"
+    from_port   = 9090
+    to_port     = 9090
+    protocol    = "tcp"
+    cidr_blocks = var.monitoring_allowed_cidr
+  }
+
+  # Loki - 타겟 서버에서 로그 전송
+  ingress {
+    description = "Loki"
+    from_port   = 3100
+    to_port     = 3100
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # Outbound - 모든 트래픽 허용
+  egress {
+    description = "Allow all outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "${var.project_name}-${var.env}-monitoring-sg"
+    Environment = var.env
+    Project     = var.project_name
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+#==============================================================================
+# Monitoring Target Security Group
+#==============================================================================
+resource "aws_security_group" "monitoring_target" {
+  name        = "${var.project_name}-${var.env}-monitoring-target-sg"
+  description = "Security group for monitoring target servers (Exporters)"
+  vpc_id      = var.vpc_id
+
+  # Node Exporter - 모니터링 서버에서만 접근
+  ingress {
+    description     = "Node Exporter"
+    from_port       = 9100
+    to_port         = 9100
+    protocol        = "tcp"
+    security_groups = [aws_security_group.monitoring.id]
+  }
+
+  # cAdvisor - 모니터링 서버에서만 접근
+  ingress {
+    description     = "cAdvisor"
+    from_port       = 8082
+    to_port         = 8082
+    protocol        = "tcp"
+    security_groups = [aws_security_group.monitoring.id]
+  }
+
+  # MySQL Exporter - 모니터링 서버에서만 접근
+  ingress {
+    description     = "MySQL Exporter"
+    from_port       = 9104
+    to_port         = 9104
+    protocol        = "tcp"
+    security_groups = [aws_security_group.monitoring.id]
+  }
+
+  # Outbound - 모든 트래픽 허용
+  egress {
+    description = "Allow all outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "${var.project_name}-${var.env}-monitoring-target-sg"
+    Environment = var.env
+    Project     = var.project_name
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  depends_on = [aws_security_group.monitoring]
+}
