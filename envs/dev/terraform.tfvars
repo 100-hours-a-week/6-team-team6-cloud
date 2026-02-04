@@ -49,6 +49,18 @@ create_eip = true
 domain_name = "billages.com"
 
 #==============================================================================
+# CloudWatch 모니터링 설정
+#==============================================================================
+# 이메일 알림 (필수)
+alarm_email = "your-email@example.com"
+# Discord 알림 (선택)
+enable_discord      = true
+discord_webhook_url = "https://discord.com/api/webhooks/1467743094194569448/52rWCykO6Rpq2IPn7MWTpNHJqMMEsvOXK3cECr62xsk4ifMNxYfKfn4nW7xjs7chCnHZ"
+
+# CPU 알람 임계값 (%)
+cpu_threshold = 80
+
+#==============================================================================
 # Monitoring 설정
 #==============================================================================
 monitoring_instance_type    = "t4g.small"   # 2 vCPU, 2GB RAM

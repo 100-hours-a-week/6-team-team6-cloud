@@ -51,3 +51,23 @@ module "ec2_main" {
   # Elastic IP 생성 (고정 IP 필요 시)
   create_eip = var.create_eip
 }
+
+#==============================================================================
+# CloudWatch 모니터링 모듈
+#==============================================================================
+module "cloudwatch" {
+  source = "../../modules/cloudwatch"
+
+  project_name  = var.project_name
+  environment   = var.env
+  instance_id   = module.ec2_main.instance_id
+  instance_name = "${var.project_name}-${var.env}-main-server"
+
+  # 알림 설정
+  alarm_email         = var.alarm_email
+  enable_discord      = var.enable_discord
+  discord_webhook_url = var.discord_webhook_url
+
+  # 알람 임계값 (선택적 커스터마이징)
+  cpu_threshold = var.cpu_threshold
+}

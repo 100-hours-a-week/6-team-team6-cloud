@@ -38,3 +38,16 @@ existing_key_name = "billage-keypair"  # dev와 동일한 키페어 사용
 
 # Elastic IP (고정 IP)
 create_eip = true
+
+#==============================================================================
+# CloudWatch 모니터링 설정
+#==============================================================================
+# 이메일 알림 (필수)
+alarm_email = "your-email@example.com"  # TODO: 실제 이메일로 변경
+
+# Discord 알림 (선택)
+enable_discord      = false
+discord_webhook_url = ""  # Discord 채널 설정 > 연동 > 웹후크에서 생성
+
+# CPU 알람 임계값 (%)
+cpu_threshold = 80

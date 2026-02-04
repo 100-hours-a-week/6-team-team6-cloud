@@ -96,3 +96,29 @@ variable "create_eip" {
   type        = bool
   default     = true
 }
+
+#==============================================================================
+# CloudWatch 모니터링 설정
+#==============================================================================
+variable "alarm_email" {
+  description = "CloudWatch 알람 수신 이메일"
+  type        = string
+}
+
+variable "enable_discord" {
+  description = "Discord 알림 활성화"
+  type        = bool
+  default     = false
+}
+
+variable "discord_webhook_url" {
+  description = "Discord 웹훅 URL"
+  type        = string
+  default     = ""
+}
+
+variable "cpu_threshold" {
+  description = "CPU 사용률 알람 임계값 (%)"
+  type        = number
+  default     = 80
+}
