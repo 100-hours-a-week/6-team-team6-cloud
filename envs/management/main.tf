@@ -173,6 +173,15 @@ resource "aws_security_group" "vpn" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # VPN 서버가 NAT 역할을 하려면 내부 VPC CIDR에서 들어오는 트래픽 허용
+  ingress {
+    description = "Allow all from Management VPC for NAT"
+    from_port   = 0           # 모든 포트
+    to_port     = 0           # 모든 포트
+    protocol    = "-1"        # 모든 프로토콜
+    cidr_blocks = [var.vpc_cidr] # Management VPC CIDR
+  }
+
   # Outbound - 모든 트래픽 허용 (VPN 클라이언트 포워딩 + NAT)
   egress {
     description = "Allow all outbound"
