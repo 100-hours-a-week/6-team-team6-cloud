@@ -70,7 +70,7 @@ data "aws_route_tables" "prod" {
 #==============================================================================
 resource "aws_security_group" "monitoring" {
   name        = "${var.project_name}-${var.env}-monitoring-sg"
-  description = "모니터링 서버 SG (Prometheus, Grafana, Loki)"
+  description = "Monitoring Server SG (Prometheus, Grafana, Loki)"
   vpc_id      = module.vpc.vpc_id
 
   # SSH - Management VPC 내부에서만 접근 (VPN 서버 경유)
@@ -152,7 +152,7 @@ resource "aws_security_group" "monitoring" {
 #==============================================================================
 resource "aws_security_group" "vpn" {
   name        = "${var.project_name}-${var.env}-vpn-sg"
-  description = "VPN 서버 SG (WireGuard + NAT instance)"
+  description = "VPN Server SG (WireGuard + NAT instance)"
   vpc_id      = module.vpc.vpc_id
 
   # SSH - 제한된 IP에서만 접근 (운영 시 특정 IP로 제한)
