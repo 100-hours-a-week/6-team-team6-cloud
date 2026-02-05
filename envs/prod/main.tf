@@ -23,11 +23,13 @@ module "vpc" {
 module "security_group" {
   source = "../../modules/security-group"
 
-  project_name     = var.project_name
-  env              = var.env
-  vpc_id           = module.vpc.vpc_id
-  ssh_allowed_cidr = var.ssh_allowed_cidr
-  db_allowed_cidr  = var.db_allowed_cidr
+  project_name           = var.project_name
+  env                    = var.env
+  vpc_id                 = module.vpc.vpc_id
+  vpc_cidr               = var.vpc_cidr
+  ssh_allowed_cidr       = var.ssh_allowed_cidr
+  db_allowed_cidr        = var.db_allowed_cidr
+  management_scrape_cidr = var.management_scrape_cidr
 }
 
 #==============================================================================
@@ -38,9 +40,14 @@ module "ec2_main" {
 
   project_name       = var.project_name
   env                = var.env
+  instance_name      = "main-server"
+  instance_role      = "monitoring-target"
   instance_type      = var.instance_type
   subnet_id          = module.vpc.public_subnet_id
-  security_group_ids = [module.security_group.main_sg_id]
+  security_group_ids = [
+    module.security_group.main_sg_id,
+    module.security_group.monitoring_target_sg_id
+  ]
   root_volume_size   = var.root_volume_size
 
   # 키페어 설정 (dev와 동일한 keypair 사용)
