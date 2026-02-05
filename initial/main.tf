@@ -52,3 +52,57 @@ resource "aws_dynamodb_table" "tf_lock" {
     type = "S"
   }
 }
+
+# ==============================================================================
+# Management Environment State Resources
+# ==============================================================================
+
+# 1. S3 버킷 생성 (Terraform State 저장용 - Management)
+resource "aws_s3_bucket" "tf_state_management" {
+  bucket = "billage-terraform-state-management"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# 1-1. S3 버저닝 활성화
+resource "aws_s3_bucket_versioning" "tf_state_versioning_management" {
+  bucket = aws_s3_bucket.tf_state_management.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# 1-2. S3 암호화 설정
+resource "aws_s3_bucket_server_side_encryption_configuration" "tf_state_encryption_management" {
+  bucket = aws_s3_bucket.tf_state_management.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+# 1-3. S3 퍼블릭 액세스 차단
+resource "aws_s3_bucket_public_access_block" "tf_state_public_access_management" {
+  bucket = aws_s3_bucket.tf_state_management.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# 2. DynamoDB 테이블 생성 (Terraform Locking 용 - Management)
+resource "aws_dynamodb_table" "tf_lock_management" {
+  name         = "billage-terraform-lock-management"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "LockID"
+
+  attribute {
+    name = "LockID"
+    type = "S"
+  }
+}
