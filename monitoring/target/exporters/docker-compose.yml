@@ -3,10 +3,11 @@ services:
   node_exporter:
     image: quay.io/prometheus/node-exporter:latest
     container_name: node_exporter
-    ports:
-      - "9100:9100"
+    network_mode: host
+    pid: host
     command:
       - '--path.rootfs=/host'
+      - '--web.listen-address=:9100'
     restart: unless-stopped
     volumes:
       - '/:/host:ro,rslave'
@@ -28,10 +29,11 @@ services:
   mysql-exporter:
     image: prom/mysqld-exporter:latest
     container_name: mysql-exporter
+    network_mode: host
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "9104:9104"
     environment:
-      - DATA_SOURCE_NAME=${MYSQL_EXPORTER_USER}:${MYSQL_EXPORTER_PASSWORD}@tcp(${MYSQL_HOST}:${MYSQL_PORT})/
+      - DATA_SOURCE_NAME=${MYSQL_EXPORTER_USER}:${MYSQL_EXPORTER_PASSWORD}@tcp(127.0.0.1:${MYSQL_PORT})/
+    command:
+      - '--web.listen-address=:9104'
