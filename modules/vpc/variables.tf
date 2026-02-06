@@ -27,3 +27,9 @@ variable "availability_zone" {
   type        = string
   default     = "ap-northeast-2a"
 }
+
+variable "private_subnet_cidr" {
+  description = "Private Subnet CIDR 블록 (빈 문자열이면 생성하지 않음)"
+  type        = string
+  default     = ""
+}

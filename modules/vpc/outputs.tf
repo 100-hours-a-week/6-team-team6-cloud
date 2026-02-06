@@ -19,3 +19,18 @@ output "internet_gateway_id" {
   description = "Internet Gateway ID"
   value       = aws_internet_gateway.main.id
 }
+
+output "public_route_table_id" {
+  description = "Public Route Table ID"
+  value       = aws_route_table.public.id
+}
+
+output "private_subnet_id" {
+  description = "Private Subnet ID (생성된 경우)"
+  value       = var.private_subnet_cidr != "" ? aws_subnet.private[0].id : null
+}
+
+output "private_route_table_id" {
+  description = "Private Route Table ID (생성된 경우)"
+  value       = var.private_subnet_cidr != "" ? aws_route_table.private[0].id : null
+}

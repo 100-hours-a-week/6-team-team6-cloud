@@ -169,6 +169,7 @@ resource "aws_security_group" "monitoring_target" {
     to_port         = 9100
     protocol        = "tcp"
     security_groups = [aws_security_group.monitoring.id]
+    cidr_blocks     = var.management_scrape_cidr
   }
 
   # cAdvisor - 모니터링 서버에서만 접근
@@ -178,6 +179,7 @@ resource "aws_security_group" "monitoring_target" {
     to_port         = 8082
     protocol        = "tcp"
     security_groups = [aws_security_group.monitoring.id]
+    cidr_blocks     = var.management_scrape_cidr
   }
 
   # MySQL Exporter - 모니터링 서버에서만 접근
@@ -187,6 +189,7 @@ resource "aws_security_group" "monitoring_target" {
     to_port         = 9104
     protocol        = "tcp"
     security_groups = [aws_security_group.monitoring.id]
+    cidr_blocks     = var.management_scrape_cidr
   }
 
   # Outbound - 모든 트래픽 허용

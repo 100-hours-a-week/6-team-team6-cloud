@@ -42,8 +42,9 @@ resource "aws_instance" "main" {
   key_name                    = var.create_key_pair ? aws_key_pair.main[0].key_name : var.existing_key_name
   subnet_id                   = var.subnet_id
   vpc_security_group_ids      = var.security_group_ids
-  associate_public_ip_address = true
+  associate_public_ip_address = var.associate_public_ip
   iam_instance_profile        = var.iam_instance_profile != "" ? var.iam_instance_profile : null
+  source_dest_check           = var.source_destination_check
 
   # 환경 설정 스크립트 (첫 부팅 시 실행)
   user_data = var.user_data != "" ? var.user_data : null

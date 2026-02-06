@@ -30,6 +30,7 @@ module "security_group" {
   ssh_allowed_cidr        = var.ssh_allowed_cidr
   db_allowed_cidr         = var.db_allowed_cidr
   monitoring_allowed_cidr = var.monitoring_allowed_cidr
+  management_scrape_cidr  = var.management_scrape_cidr
 }
 
 #==============================================================================

@@ -34,3 +34,8 @@ output "key_pair_name" {
   description = "키페어 이름"
   value       = var.create_key_pair ? aws_key_pair.main[0].key_name : var.existing_key_name
 }
+
+output "primary_network_interface_id" {
+  description = "EC2 인스턴스의 주 네트워크 인터페이스 ID (라우팅 테이블 타겟 지정용)"
+  value       = aws_instance.main.primary_network_interface_id
+}

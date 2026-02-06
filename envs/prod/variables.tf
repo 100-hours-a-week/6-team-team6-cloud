@@ -97,6 +97,12 @@ variable "create_eip" {
   default     = true
 }
 
+variable "management_scrape_cidr" {
+  description = "Management VPC Prometheus 접근 허용 CIDR"
+  type        = list(string)
+  default     = ["10.2.0.0/16"]
+}
+
 #==============================================================================
 # CloudWatch 모니터링 설정
 #==============================================================================

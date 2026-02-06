@@ -164,3 +164,9 @@ variable "monitoring_allowed_cidr" {
   type        = list(string)
   default     = ["0.0.0.0/0"]  # 개발 단계, 운영 시 관리자 IP로 제한
 }
+
+variable "management_scrape_cidr" {
+  description = "Management VPC Prometheus 접근 허용 CIDR"
+  type        = list(string)
+  default     = ["10.2.0.0/16"]
+}

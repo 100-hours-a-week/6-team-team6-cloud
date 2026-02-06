@@ -85,3 +85,15 @@ variable "iam_instance_profile" {
   type        = string
   default     = ""
 }
+
+variable "associate_public_ip" {
+  description = "퍼블릭 IP 자동 할당 여부"
+  type        = bool
+  default     = true
+}
+
+variable "source_destination_check" {
+  description = "Source/Destination Check (NAT instance용으로 false 설정)"
+  type        = bool
+  default     = true
+}
