@@ -44,6 +44,7 @@ resource "aws_instance" "main" {
   vpc_security_group_ids      = var.security_group_ids
   associate_public_ip_address = var.associate_public_ip
   iam_instance_profile        = var.iam_instance_profile != "" ? var.iam_instance_profile : null
+  source_dest_check           = var.source_destination_check
 
   # 환경 설정 스크립트 (첫 부팅 시 실행)
   user_data = var.user_data != "" ? var.user_data : null
