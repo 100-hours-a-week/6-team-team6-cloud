@@ -1,0 +1,102 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  # ============================================
+  # 로컬 (모니터링 서버)
+  # ============================================
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # ============================================
+  # EC2 Service Discovery
+  # ============================================
+  - job_name: 'ec2-node-exporter'
+    ec2_sd_configs:
+      - region: ap-northeast-2
+        refresh_interval: 60s
+        filters:
+          - name: tag:Role
+            values: ['monitoring-target']
+          - name: instance-state-name
+            values: ['running']
+    relabel_configs:
+      - source_labels: [__meta_ec2_private_ip]
+        replacement: '${1}:9100'
+        target_label: __address__
+      - source_labels: [__meta_ec2_instance_id]
+        target_label: instance_id
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance_name
+      - source_labels: [__meta_ec2_availability_zone]
+        target_label: az
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance
+
+  - job_name: 'ec2-cadvisor'
+    ec2_sd_configs:
+      - region: ap-northeast-2
+        refresh_interval: 60s
+        filters:
+          - name: tag:Role
+            values: ['monitoring-target']
+          - name: instance-state-name
+            values: ['running']
+    relabel_configs:
+      - source_labels: [__meta_ec2_private_ip]
+        replacement: '${1}:8082'
+        target_label: __address__
+      - source_labels: [__meta_ec2_instance_id]
+        target_label: instance_id
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance_name
+      - source_labels: [__meta_ec2_availability_zone]
+        target_label: az
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance
+
+  - job_name: 'ec2-spring-actuator'
+    ec2_sd_configs:
+      - region: ap-northeast-2
+        refresh_interval: 60s
+        filters:
+          - name: tag:Role
+            values: ['monitoring-target']
+          - name: instance-state-name
+            values: ['running']
+    metrics_path: '/actuator/prometheus'
+    relabel_configs:
+      - source_labels: [__meta_ec2_private_ip]
+        replacement: '${1}:8080'
+        target_label: __address__
+      - source_labels: [__meta_ec2_instance_id]
+        target_label: instance_id
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance_name
+      - source_labels: [__meta_ec2_availability_zone]
+        target_label: az
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance
+
+  - job_name: 'ec2-mysql-exporter'
+    ec2_sd_configs:
+      - region: ap-northeast-2
+        refresh_interval: 60s
+        filters:
+          - name: tag:Role
+            values: ['monitoring-target']
+          - name: instance-state-name
+            values: ['running']
+    relabel_configs:
+      - source_labels: [__meta_ec2_private_ip]
+        replacement: '${1}:9104'
+        target_label: __address__
+      - source_labels: [__meta_ec2_instance_id]
+        target_label: instance_id
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance_name
+      - source_labels: [__meta_ec2_availability_zone]
+        target_label: az
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance
