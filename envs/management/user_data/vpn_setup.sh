@@ -66,9 +66,11 @@ cat <<EOF > /etc/wireguard/wg0.conf
 Address = 10.100.0.1/24
 ListenPort = 51820
 PrivateKey = $SERVER_PRIV
-# VPN 통과 시 NAT 적용 (확실하게 하기 위해 중복 적용)
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o $PUB_IF -j MASQUERADE
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o $PUB_IF -j MASQUERADE
+# VPN 통과 시 NAT 적용 및 양방향 FORWARD 허용
+# -i wg0: VPN 클라이언트 → 외부 (요청)
+# -o wg0 RELATED,ESTABLISHED: 외부 → VPN 클라이언트 (응답)
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -o $PUB_IF -j MASQUERADE
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -D POSTROUTING -o $PUB_IF -j MASQUERADE
 
 [Peer]
 PublicKey = $CLIENT_PUB

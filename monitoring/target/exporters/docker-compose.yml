@@ -1,0 +1,39 @@
+services:
+  # ===== Exporters =====
+  node_exporter:
+    image: quay.io/prometheus/node-exporter:latest
+    container_name: node_exporter
+    network_mode: host
+    pid: host
+    command:
+      - '--path.rootfs=/host'
+      - '--web.listen-address=:9100'
+    restart: unless-stopped
+    volumes:
+      - '/:/host:ro,rslave'
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    restart: unless-stopped
+    ports:
+      - "8082:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+
+  mysql-exporter:
+    image: prom/mysqld-exporter:latest
+    container_name: mysql-exporter
+    network_mode: host
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATA_SOURCE_NAME=${MYSQL_EXPORTER_USER}:${MYSQL_EXPORTER_PASSWORD}@tcp(127.0.0.1:${MYSQL_PORT})/
+    command:
+      - '--web.listen-address=:9104'
