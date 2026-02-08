@@ -63,10 +63,11 @@ resource "aws_instance" "main" {
   }
 
   # 인스턴스 메타데이터 서비스 v2 (보안 강화)
+  # hop_limit=2: Docker 컨테이너에서 IMDS 접근 허용 (Service Discovery 등)
   metadata_options {
     http_endpoint               = "enabled"
     http_tokens                 = "required"  # IMDSv2 강제
-    http_put_response_hop_limit = 1
+    http_put_response_hop_limit = 2
   }
 
   # 인스턴스 종료 방지 (운영 환경에서 활성화)

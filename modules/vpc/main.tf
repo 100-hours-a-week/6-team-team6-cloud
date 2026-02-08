@@ -40,19 +40,23 @@ resource "aws_internet_gateway" "main" {
 }
 
 # Route Table for Public Subnet
+# [주의] route 블록을 인라인으로 정의하면 VPC Peering 등 외부 라우트와 충돌
+# 별도 aws_route 리소스로 분리하여 관리
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.main.id
-  }
 
   tags = {
     Name        = "${var.project_name}-${var.env}-public-rt"
     Environment = var.env
     Project     = var.project_name
   }
+}
+
+# Default Route to Internet Gateway (Public Subnet)
+resource "aws_route" "public_internet" {
+  route_table_id         = aws_route_table.public.id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.main.id
 }
 
 # Route Table Association
