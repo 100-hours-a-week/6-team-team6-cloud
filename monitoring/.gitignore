@@ -1,0 +1,17 @@
+# Environment files with sensitive data (MySQL password)
+target/exporters/.env
+
+# Promtail positions (runtime data)
+target/promtail/positions/
+
+# Server environment (may contain passwords)
+server/.env
+
+# Docker volumes data
+**/data/
+**/volumes/
+
+# Logs
+*.log
+
+.env*
