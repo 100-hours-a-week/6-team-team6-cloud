@@ -38,8 +38,9 @@ limits_config:
   ingestion_burst_size_mb: 50
   max_streams_per_user: 10000
   reject_old_samples: true
-  reject_old_samples_max_age: 168h
+  reject_old_samples_max_age: 2160h  # 90일 (90 * 24 = 2160)
   max_line_size: 512kb
+  retention_period: 2160h  # 90일 retention
 
 ingester:
   chunk_idle_period: 30m

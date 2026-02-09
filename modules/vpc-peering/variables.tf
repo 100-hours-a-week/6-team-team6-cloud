@@ -44,3 +44,9 @@ variable "accepter_route_table_ids" {
   description = "수락측 라우팅 테이블 ID 목록 (피어 방향 라우트 추가 대상)"
   type        = list(string)
 }
+
+variable "vpn_cidr" {
+  description = "WireGuard VPN CIDR (Pure Routing용 - Dev/Prod에서 VPN 클라이언트로 응답 라우팅)"
+  type        = string
+  default     = ""
+}

@@ -112,3 +112,19 @@ variable "monitoring_admin_cidr" {
   type        = list(string)
   default     = ["10.100.0.0/24", "10.2.0.0/16"]  # WireGuard 터널 서브넷 + Management VPC
 }
+
+#==============================================================================
+# VPN 클라이언트 대역 설정 (Pure Routing용)
+# Management VPC CIDR(10.2.0.0/16) 내부 대역 사용 - VPC Peering 호환
+# 역할별 CIDR 대역:
+#   System:   10.2.100.0/28  (.1 VPN Server)
+#   DevOps:   10.2.100.16/28 (.17 ~ .30)
+#   Backend:  10.2.100.32/28 (.33 ~ .46)
+#   Frontend: 10.2.100.48/28 (.49 ~ .62)
+#   AI/ML:    10.2.100.64/28 (.65 ~ .78)
+#==============================================================================
+variable "vpn_client_cidr" {
+  description = "WireGuard VPN 클라이언트 전체 대역"
+  type        = string
+  default     = "10.100.0.0/24"
+}

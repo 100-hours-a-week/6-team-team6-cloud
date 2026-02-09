@@ -16,6 +16,15 @@ resource "aws_security_group" "main" {
     cidr_blocks = var.ssh_allowed_cidr
   }
 
+  # SSH - DevOps VPN (항상 허용 - DevOps는 모든 인스턴스 접근 권한)
+  ingress {
+    description = "SSH from DevOps VPN"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.vpn_devops_cidr]
+  }
+
   # HTTP
   ingress {
     description = "HTTP"
@@ -79,6 +88,122 @@ resource "aws_security_group" "main" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  #============================================================================
+  # VPN 역할별 접근 제어 (Pure Routing용)
+  # DevOps:   10.100.0.16/28 - SSH, 전체 서비스
+  # Backend:  10.100.0.32/28 - SSH, MySQL, Spring Boot
+  # Frontend: 10.100.0.48/28 - Web Port (80, 443, 3000)
+  # AI/ML:    10.100.0.64/28 - FastAPI (5000)
+  #============================================================================
+
+  # DevOps VPN - SSH 접근
+  dynamic "ingress" {
+    for_each = var.enable_vpn_role_based_access ? [1] : []
+    content {
+      description = "SSH from DevOps VPN"
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = [var.vpn_devops_cidr]
+    }
+  }
+
+  # DevOps VPN - 전체 서비스 접근 (MySQL, Spring Boot, FastAPI)
+  dynamic "ingress" {
+    for_each = var.enable_vpn_role_based_access ? [1] : []
+    content {
+      description = "All services from DevOps VPN"
+      from_port   = 0
+      to_port     = 65535
+      protocol    = "tcp"
+      cidr_blocks = [var.vpn_devops_cidr]
+    }
+  }
+
+  # Backend VPN - SSH 접근
+  dynamic "ingress" {
+    for_each = var.enable_vpn_role_based_access ? [1] : []
+    content {
+      description = "SSH from Backend VPN"
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = [var.vpn_backend_cidr]
+    }
+  }
+
+  # Backend VPN - MySQL 접근
+  dynamic "ingress" {
+    for_each = var.enable_vpn_role_based_access ? [1] : []
+    content {
+      description = "MySQL from Backend VPN"
+      from_port   = 3306
+      to_port     = 3306
+      protocol    = "tcp"
+      cidr_blocks = [var.vpn_backend_cidr]
+    }
+  }
+
+  # Backend VPN - Spring Boot 접근
+  dynamic "ingress" {
+    for_each = var.enable_vpn_role_based_access ? [1] : []
+    content {
+      description = "Spring Boot from Backend VPN"
+      from_port   = 8080
+      to_port     = 8080
+      protocol    = "tcp"
+      cidr_blocks = [var.vpn_backend_cidr]
+    }
+  }
+
+  # Frontend VPN - HTTP 접근
+  dynamic "ingress" {
+    for_each = var.enable_vpn_role_based_access ? [1] : []
+    content {
+      description = "HTTP from Frontend VPN"
+      from_port   = 80
+      to_port     = 80
+      protocol    = "tcp"
+      cidr_blocks = [var.vpn_frontend_cidr]
+    }
+  }
+
+  # Frontend VPN - HTTPS 접근
+  dynamic "ingress" {
+    for_each = var.enable_vpn_role_based_access ? [1] : []
+    content {
+      description = "HTTPS from Frontend VPN"
+      from_port   = 443
+      to_port     = 443
+      protocol    = "tcp"
+      cidr_blocks = [var.vpn_frontend_cidr]
+    }
+  }
+
+  # Frontend VPN - Next.js 접근
+  dynamic "ingress" {
+    for_each = var.enable_vpn_role_based_access ? [1] : []
+    content {
+      description = "Next.js from Frontend VPN"
+      from_port   = 3000
+      to_port     = 3000
+      protocol    = "tcp"
+      cidr_blocks = [var.vpn_frontend_cidr]
+    }
+  }
+
+  # AI/ML VPN - FastAPI 접근
+  dynamic "ingress" {
+    for_each = var.enable_vpn_role_based_access ? [1] : []
+    content {
+      description = "FastAPI from AI/ML VPN"
+      from_port   = 5000
+      to_port     = 5000
+      protocol    = "tcp"
+      cidr_blocks = [var.vpn_ai_ml_cidr]
+    }
+  }
+
   tags = {
     Name        = "${var.project_name}-${var.env}-main-sg"
     Environment = var.env
@@ -107,6 +232,15 @@ resource "aws_security_group" "monitoring" {
     cidr_blocks = var.ssh_allowed_cidr
   }
 
+  # SSH - DevOps VPN (항상 허용 - DevOps는 모든 인스턴스 접근 권한)
+  ingress {
+    description = "SSH from DevOps VPN"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.vpn_devops_cidr]
+  }
+
   # Grafana - 관리자 접근
   ingress {
     description = "Grafana"
@@ -132,6 +266,20 @@ resource "aws_security_group" "monitoring" {
     to_port     = 3100
     protocol    = "tcp"
     cidr_blocks = [var.vpc_cidr]
+  }
+
+  #============================================================================
+  # DevOps VPN - 모니터링 서버 전체 접근 (SSH, Grafana, Prometheus, Loki)
+  #============================================================================
+  dynamic "ingress" {
+    for_each = var.enable_vpn_role_based_access ? [1] : []
+    content {
+      description = "All access from DevOps VPN"
+      from_port   = 0
+      to_port     = 65535
+      protocol    = "tcp"
+      cidr_blocks = [var.vpn_devops_cidr]
+    }
   }
 
   # Outbound - 모든 트래픽 허용
@@ -190,6 +338,31 @@ resource "aws_security_group" "monitoring_target" {
     protocol        = "tcp"
     security_groups = [aws_security_group.monitoring.id]
     cidr_blocks     = var.management_scrape_cidr
+  }
+
+  #============================================================================
+  # DevOps VPN - Exporter 접근 (Node Exporter, cAdvisor, MySQL Exporter)
+  #============================================================================
+  dynamic "ingress" {
+    for_each = var.enable_vpn_role_based_access ? [1] : []
+    content {
+      description = "Exporters from DevOps VPN"
+      from_port   = 9100
+      to_port     = 9104
+      protocol    = "tcp"
+      cidr_blocks = [var.vpn_devops_cidr]
+    }
+  }
+
+  dynamic "ingress" {
+    for_each = var.enable_vpn_role_based_access ? [1] : []
+    content {
+      description = "cAdvisor from DevOps VPN"
+      from_port   = 8082
+      to_port     = 8082
+      protocol    = "tcp"
+      cidr_blocks = [var.vpn_devops_cidr]
+    }
   }
 
   # Outbound - 모든 트래픽 허용
