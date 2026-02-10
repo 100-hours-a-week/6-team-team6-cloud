@@ -73,13 +73,13 @@ resource "aws_security_group" "monitoring" {
   description = "Monitoring Server SG (Prometheus, Grafana, Loki)"
   vpc_id      = module.vpc.vpc_id
 
-  # SSH - Management VPC 내부에서만 접근 (VPN 서버 경유)
+  # SSH - Management VPC 내부 + DevOps VPN
   ingress {
-    description = "SSH from Management VPC"
+    description = "SSH from Management VPC and DevOps VPN"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
+    cidr_blocks = [var.vpc_cidr, "10.100.0.16/28"]
   }
 
   # Grafana - WireGuard 터널 및 VPC 내부 접근
@@ -164,6 +164,15 @@ resource "aws_security_group" "vpn" {
     cidr_blocks = var.ssh_allowed_cidr
   }
 
+  # SSH - DevOps VPN (VPN 터널을 통한 관리 접근)
+  ingress {
+    description = "SSH from DevOps VPN"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["10.100.0.16/28"]
+  }
+
   # WireGuard VPN - 모든 IP에서 UDP 접근 허용
   ingress {
     description = "WireGuard VPN"
@@ -180,6 +189,24 @@ resource "aws_security_group" "vpn" {
     to_port     = 0           # 모든 포트
     protocol    = "-1"        # 모든 프로토콜
     cidr_blocks = [var.vpc_cidr] # Management VPC CIDR
+  }
+
+  # VPN 클라이언트 응답 트래픽 - Dev/Prod VPC에서 VPN 클라이언트로 돌아오는 트래픽 허용
+  # Pure Routing: Dev/Prod → VPC Peering → VPN Server → wg0 → VPN Client
+  ingress {
+    description = "Allow response traffic from Dev VPC for Pure Routing"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [data.terraform_remote_state.dev.outputs.vpc_cidr]
+  }
+
+  ingress {
+    description = "Allow response traffic from Prod VPC for Pure Routing"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [data.terraform_remote_state.prod.outputs.vpc_cidr]
   }
 
   # Outbound - 모든 트래픽 허용 (VPN 클라이언트 포워딩 + NAT)
@@ -316,8 +343,14 @@ module "ec2_vpn" {
   public_key        = var.public_key
   existing_key_name = var.existing_key_name
 
-  # User Data - WireGuard & NAT Setup
-  user_data = file("${path.module}/user_data/vpn_setup.sh")
+  # User Data - WireGuard & NAT Setup + Promtail
+  # Loki 서버 IP를 동적으로 전달 (모니터링 서버 Private IP)
+  user_data = templatefile("${path.module}/user_data/vpn_setup.sh", {
+    loki_host = module.ec2_monitoring.instance_private_ip
+  })
+
+  # VPN 서버는 모니터링 서버보다 먼저 생성될 수 있으므로 의존성 명시
+  depends_on = [module.ec2_monitoring]
 }
 
 #==============================================================================
@@ -347,6 +380,9 @@ module "vpc_peering_dev" {
 
   requester_route_table_ids = [module.vpc.public_route_table_id, module.vpc.private_route_table_id]
   accepter_route_table_ids  = data.aws_route_tables.dev.ids
+
+  # Masquerade 사용 - VPN CIDR 라우트 불필요
+  vpn_cidr = ""
 }
 
 #==============================================================================
@@ -366,4 +402,7 @@ module "vpc_peering_prod" {
 
   requester_route_table_ids = [module.vpc.public_route_table_id, module.vpc.private_route_table_id]
   accepter_route_table_ids  = data.aws_route_tables.prod.ids
+
+  # Masquerade 사용 - VPN CIDR 라우트 불필요
+  vpn_cidr = ""
 }

@@ -31,6 +31,13 @@ module "security_group" {
   db_allowed_cidr         = var.db_allowed_cidr
   monitoring_allowed_cidr = var.monitoring_allowed_cidr
   management_scrape_cidr  = var.management_scrape_cidr
+
+  # VPN 역할별 접근 제어 (Pure Routing용)
+  enable_vpn_role_based_access = var.enable_vpn_role_based_access
+  vpn_devops_cidr              = var.vpn_devops_cidr
+  vpn_backend_cidr             = var.vpn_backend_cidr
+  vpn_frontend_cidr            = var.vpn_frontend_cidr
+  vpn_ai_ml_cidr               = var.vpn_ai_ml_cidr
 }
 
 #==============================================================================

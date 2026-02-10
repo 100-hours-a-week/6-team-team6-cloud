@@ -30,3 +30,13 @@ resource "aws_route" "from_peer" {
   destination_cidr_block    = var.requester_vpc_cidr
   vpc_peering_connection_id = aws_vpc_peering_connection.main.id
 }
+
+# VPN 클라이언트 대역 → 수락측 VPC Route Table에 라우트 추가 (Pure Routing용)
+# Dev/Prod에서 VPN 클라이언트(10.100.0.0/24)로의 응답 경로
+# [주의] 이 라우트가 없으면 VPN 클라이언트로의 응답 패킷이 유실됨
+resource "aws_route" "vpn_to_accepter" {
+  count                     = var.vpn_cidr != "" ? length(var.accepter_route_table_ids) : 0
+  route_table_id            = var.accepter_route_table_ids[count.index]
+  destination_cidr_block    = var.vpn_cidr
+  vpc_peering_connection_id = aws_vpc_peering_connection.main.id
+}
