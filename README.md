@@ -6,18 +6,32 @@
 
 ```
 terraform/
-├── modules/                    # 재사용 가능한 모듈
+├── modules/                    # 재사용 가능한 모듈 (v1, v2 공용)
 │   ├── vpc/                    # VPC, Subnet, IGW, Route Table
 │   ├── ec2/                    # EC2 인스턴스
-│   └── security-group/         # Security Group
-├── envs/                       # 환경별 설정
-│   └── dev/                    # 개발 환경
-│       ├── backend.tf          # S3 Backend 설정
-│       ├── main.tf             # 모듈 호출
-│       ├── variables.tf        # 변수 정의
-│       ├── outputs.tf          # 출력 정의
-│       └── terraform.tfvars    # 변수 값 (gitignore)
-└── .gitignore
+│   ├── security-group/         # Security Group
+│   ├── vpc-peering/            # VPC Peering
+│   ├── cloudwatch/             # CloudWatch 알람
+│   └── s3-images/              # S3 이미지 저장소
+│
+├── v1-bigbang/                 # v1: 단일 인스턴스 아키텍처 (현재 운영)
+│   └── envs/
+│       ├── dev/
+│       └── prod/
+│
+├── v2/                         # v2: Auto Scaling + ALB (마이그레이션 예정)
+│   └── envs/
+│       ├── dev/
+│       └── prod/
+│
+├── shared/                     # 공용 인프라 (v1, v2 공통)
+│   ├── management/             # VPN + 모니터링
+│   ├── s3-images-dev/
+│   └── s3-images-prod/
+│
+├── monitoring/                 # Docker Compose 기반 모니터링
+├── scripts/                    # 서버 설정 스크립트
+└── docs/                       # 상세 문서
 ```
 
 ## 🚀 시작하기
@@ -43,8 +57,12 @@ aws configure
 ### 2. 변수 파일 설정
 
 ```bash
-cd envs/dev
+# v1 환경 (현재 운영)
+cd v1-bigbang/envs/dev
 cp terraform.tfvars.example terraform.tfvars
+
+# v2 환경 (마이그레이션)
+cd v2/envs/dev
 ```
 
 `terraform.tfvars` 수정:
@@ -287,7 +305,7 @@ flowchart LR
 98.88.247.68 - "GET /actuator/env HTTP/1.1" 404 ← Nginx에서 차단
 ```
 
-> 📖 상세 분석: [Security Analysis](./docs/SECURITY_ANALYSIS.md) | [Decision Log](./docs/SECURITY_DECISION_LOG.md)
+> 📖 상세 분석: [Security Analysis](context/docs/SECURITY_ANALYSIS.md) | [Decision Log](context/docs/SECURITY_DECISION_LOG.md)
 
 ### 보안 권장사항
 

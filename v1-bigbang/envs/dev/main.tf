@@ -8,7 +8,7 @@
 # VPC 모듈
 #==============================================================================
 module "vpc" {
-  source = "../../modules/vpc"
+  source = "../../../modules/vpc"
 
   project_name       = var.project_name
   env                = var.env
@@ -21,7 +21,7 @@ module "vpc" {
 # Security Group 모듈
 #==============================================================================
 module "security_group" {
-  source = "../../modules/security-group"
+  source = "../../../modules/security-group"
 
   project_name            = var.project_name
   env                     = var.env
@@ -44,7 +44,7 @@ module "security_group" {
 # EC2 모듈 - Main Server (DB 포함)
 #==============================================================================
 module "ec2_main" {
-  source = "../../modules/ec2"
+  source = "../../../modules/ec2"
 
   project_name       = var.project_name
   env                = var.env
@@ -67,7 +67,7 @@ module "ec2_main" {
   create_eip = var.create_eip
 
   # 환경 설정 스크립트 (첫 부팅 시 자동 실행)
-  user_data = var.run_setup_script ? file("${path.module}/../../scripts/setup.sh") : ""
+  user_data = var.run_setup_script ? file("${path.module}/../../../scripts/setup.sh") : ""
 }
 
 #==============================================================================
@@ -125,7 +125,7 @@ resource "aws_iam_instance_profile" "prometheus_ec2_discovery" {
 # EC2 모듈 - Monitoring Server (Prometheus, Grafana, Loki)
 #==============================================================================
 module "ec2_monitoring" {
-  source = "../../modules/ec2"
+  source = "../../../modules/ec2"
 
   project_name       = var.project_name
   env                = var.env
@@ -171,7 +171,7 @@ resource "aws_route53_record" "dev" {
 # CloudWatch 모니터링 모듈
 #==============================================================================
 module "cloudwatch" {
-  source = "../../modules/cloudwatch"
+  source = "../../../modules/cloudwatch"
 
   project_name  = var.project_name
   environment   = var.env
