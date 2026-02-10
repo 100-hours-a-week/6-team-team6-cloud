@@ -170,3 +170,43 @@ variable "management_scrape_cidr" {
   type        = list(string)
   default     = ["10.2.0.0/16"]
 }
+
+#==============================================================================
+# VPN 역할별 접근 제어 설정 (Pure Routing용)
+# Management VPC CIDR(10.2.0.0/16) 내부 대역 사용 - VPC Peering 호환
+# 역할별 CIDR 대역:
+#   System:   10.100.0.0/28  (.1 VPN Server)
+#   DevOps:   10.100.0.16/28 (.17 ~ .30)
+#   Backend:  10.100.0.32/28 (.33 ~ .46)
+#   Frontend: 10.100.0.48/28 (.49 ~ .62)
+#   AI/ML:    10.100.0.64/28 (.65 ~ .78)
+#==============================================================================
+variable "enable_vpn_role_based_access" {
+  description = "역할별 VPN IP 기반 접근 제어 활성화"
+  type        = bool
+  default     = true
+}
+
+variable "vpn_devops_cidr" {
+  description = "DevOps Team VPN CIDR"
+  type        = string
+  default     = "10.100.0.16/28"
+}
+
+variable "vpn_backend_cidr" {
+  description = "Backend Team VPN CIDR"
+  type        = string
+  default     = "10.100.0.32/28"
+}
+
+variable "vpn_frontend_cidr" {
+  description = "Frontend Team VPN CIDR"
+  type        = string
+  default     = "10.100.0.48/28"
+}
+
+variable "vpn_ai_ml_cidr" {
+  description = "AI/ML Team VPN CIDR"
+  type        = string
+  default     = "10.100.0.64/28"
+}

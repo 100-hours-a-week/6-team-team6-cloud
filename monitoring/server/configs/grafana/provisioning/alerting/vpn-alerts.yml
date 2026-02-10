@@ -1,0 +1,183 @@
+# VPN 보안 알람 규칙
+# Grafana Alerting Provisioning
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: VPN Security Alerts
+    folder: VPN
+    interval: 1m
+    rules:
+      # 1. 비인가 SSH 접근 시도 (DevOps 외 역할에서 SSH 접근)
+      - uid: vpn-unauthorized-ssh
+        title: Unauthorized SSH Access Attempt
+        condition: A
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: |
+                count_over_time({job="vpn-traffic", role!="devops", role!="unknown", dst_port="22"} [5m]) > 0
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "SSH access attempt from non-DevOps role"
+          description: "A VPN user outside the DevOps team attempted to access SSH (port 22). Check VPN traffic logs."
+        labels:
+          severity: high
+          team: security
+
+      # 2. 비인가 DB 접근 시도 (Backend/DevOps 외 역할에서 MySQL 접근)
+      - uid: vpn-unauthorized-db
+        title: Unauthorized Database Access Attempt
+        condition: A
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: |
+                count_over_time({job="vpn-traffic", role!~"backend|devops", role!="unknown", dst_port="3306"} [5m]) > 0
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "MySQL access attempt from unauthorized role"
+          description: "A VPN user outside Backend/DevOps team attempted to access MySQL (port 3306)."
+        labels:
+          severity: critical
+          team: security
+
+      # 3. 알 수 없는 IP 대역에서 접근
+      - uid: vpn-unknown-source
+        title: Unknown VPN Source IP
+        condition: A
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: |
+                count_over_time({job="vpn-traffic", role="unknown"} [5m]) > 0
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "Traffic from unknown VPN IP range"
+          description: "Traffic detected from an IP not in any defined role CIDR (10.100.0.x)."
+        labels:
+          severity: critical
+          team: security
+
+      # 4. 대량 트래픽 감지 (1분에 100개 이상)
+      - uid: vpn-high-traffic
+        title: High VPN Traffic Volume
+        condition: A
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: |
+                sum(count_over_time({job="vpn-traffic"} [1m])) > 100
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "High VPN traffic detected"
+          description: "More than 100 VPN traffic events in the last minute. Possible DDoS or port scan."
+        labels:
+          severity: warning
+          team: devops
+
+      # 5. Frontend 역할의 SSH 접근 시도 (차단되어야 함)
+      - uid: vpn-frontend-ssh-attempt
+        title: Frontend Role SSH Attempt (Should be Blocked)
+        condition: A
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: |
+                count_over_time({job="vpn-traffic", role="frontend", dst_port="22"} [5m]) > 0
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "Frontend user attempted SSH access"
+          description: "Frontend role should not have SSH access. This traffic should be blocked by iptables."
+        labels:
+          severity: high
+          team: security
+
+      # 6. AI/ML 역할의 DB 접근 시도 (차단되어야 함)
+      - uid: vpn-aiml-db-attempt
+        title: AI/ML Role Database Attempt (Should be Blocked)
+        condition: A
+        data:
+          - refId: A
+            queryType: instant
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              expr: |
+                count_over_time({job="vpn-traffic", role="aiml", dst_port=~"3306|5432"} [5m]) > 0
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "AI/ML user attempted database access"
+          description: "AI/ML role should not have direct database access. Check iptables rules."
+        labels:
+          severity: medium
+          team: security
+
+contactPoints:
+  - orgId: 1
+    name: discord-vpn-alerts
+    receivers:
+      - uid: discord-vpn
+        type: discord
+        settings:
+          url: "https://discord.com/api/webhooks/1470083902751113449/NR0KhOAZBYunwgXPkbJihVkJJCCqQnLzTinnpAZbyoZeu05nHnl8azOnnIWyA12wplJU"
+          message: |
+            **🚨 VPN Security Alert**
+            {{ range .Alerts }}
+            **{{ .Labels.alertname }}**
+            📋 Summary: {{ .Annotations.summary }}
+            📝 Description: {{ .Annotations.description }}
+            ⚠️  Severity: {{ .Labels.severity }}
+            👥 Team: {{ .Labels.team }}
+            ⏰ Time: {{ .StartsAt }}
+            {{ end }}
+
+policies:
+  - orgId: 1
+    receiver: discord-vpn-alerts
+    group_by: ['alertname']
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+    matchers:
+      - team =~ security|devops
