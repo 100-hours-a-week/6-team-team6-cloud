@@ -52,32 +52,14 @@ resource "aws_security_group" "main" {
     cidr_blocks = var.db_allowed_cidr
   }
 
-  # Spring Boot Backend
-  ingress {
-    description = "Spring Boot"
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # Spring Boot Backend - VPN에서만 접근 (Nginx 리버스 프록시 경유)
+  # 0.0.0.0/0 제거됨 - VPN role-based access로 대체
 
-  # Next.js Frontend
-  ingress {
-    description = "Next.js"
-    from_port   = 3000
-    to_port     = 3000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # Next.js Frontend - VPN에서만 접근 (Nginx 리버스 프록시 경유)
+  # 0.0.0.0/0 제거됨 - VPN role-based access로 대체
 
-  # FastAPI AI Server
-  ingress {
-    description = "FastAPI"
-    from_port   = 5000
-    to_port     = 5000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # FastAPI AI Server - VPN에서만 접근 (Nginx 리버스 프록시 경유)
+  # 0.0.0.0/0 제거됨 - VPN role-based access로 대체
 
   # Outbound - 모든 트래픽 허용
   egress {
