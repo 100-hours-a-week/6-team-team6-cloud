@@ -8,7 +8,7 @@
 # VPC 모듈
 #==============================================================================
 module "vpc" {
-  source = "../../modules/vpc"
+  source = "../../../modules/vpc"
 
   project_name       = var.project_name
   env                = var.env
@@ -21,7 +21,7 @@ module "vpc" {
 # Security Group 모듈
 #==============================================================================
 module "security_group" {
-  source = "../../modules/security-group"
+  source = "../../../modules/security-group"
 
   project_name           = var.project_name
   env                    = var.env
@@ -43,7 +43,7 @@ module "security_group" {
 # EC2 모듈 - Main Server (DB 포함)
 #==============================================================================
 module "ec2_main" {
-  source = "../../modules/ec2"
+  source = "../../../modules/ec2"
 
   project_name       = var.project_name
   env                = var.env
@@ -70,7 +70,7 @@ module "ec2_main" {
 # CloudWatch 모니터링 모듈
 #==============================================================================
 module "cloudwatch" {
-  source = "../../modules/cloudwatch"
+  source = "../../../modules/cloudwatch"
 
   project_name  = var.project_name
   environment   = var.env

@@ -6,18 +6,32 @@
 
 ```
 terraform/
-├── modules/                    # 재사용 가능한 모듈
+├── modules/                    # 재사용 가능한 모듈 (v1, v2 공용)
 │   ├── vpc/                    # VPC, Subnet, IGW, Route Table
 │   ├── ec2/                    # EC2 인스턴스
-│   └── security-group/         # Security Group
-├── envs/                       # 환경별 설정
-│   └── dev/                    # 개발 환경
-│       ├── backend.tf          # S3 Backend 설정
-│       ├── main.tf             # 모듈 호출
-│       ├── variables.tf        # 변수 정의
-│       ├── outputs.tf          # 출력 정의
-│       └── terraform.tfvars    # 변수 값 (gitignore)
-└── .gitignore
+│   ├── security-group/         # Security Group
+│   ├── vpc-peering/            # VPC Peering
+│   ├── cloudwatch/             # CloudWatch 알람
+│   └── s3-images/              # S3 이미지 저장소
+│
+├── v1-bigbang/                 # v1: 단일 인스턴스 아키텍처 (현재 운영)
+│   └── envs/
+│       ├── dev/
+│       └── prod/
+│
+├── v2/                         # v2: Auto Scaling + ALB (마이그레이션 예정)
+│   └── envs/
+│       ├── dev/
+│       └── prod/
+│
+├── shared/                     # 공용 인프라 (v1, v2 공통)
+│   ├── management/             # VPN + 모니터링
+│   ├── s3-images-dev/
+│   └── s3-images-prod/
+│
+├── monitoring/                 # Docker Compose 기반 모니터링
+├── scripts/                    # 서버 설정 스크립트
+└── docs/                       # 상세 문서
 ```
 
 ## 🚀 시작하기
@@ -43,8 +57,12 @@ aws configure
 ### 2. 변수 파일 설정
 
 ```bash
-cd envs/dev
+# v1 환경 (현재 운영)
+cd v1-bigbang/envs/dev
 cp terraform.tfvars.example terraform.tfvars
+
+# v2 환경 (마이그레이션)
+cd v2/envs/dev
 ```
 
 `terraform.tfvars` 수정:
@@ -138,12 +156,164 @@ terraform init -migrate-state
 | Elastic IP | 무료 (사용 중일 때) |
 | **합계** | **~36,000원** |
 
-## 🔐 보안 권장사항
+## 🔐 Security Architecture
 
-1. **SSH 접근 제한**: `ssh_allowed_cidr`를 개발자 IP로 제한
-2. **DB 접근 제한**: 운영 시 `db_allowed_cidr`를 VPC CIDR로 제한
+> Zero Trust 원칙 기반의 인프라 보안 설계
+
+### 보안 아키텍처 다이어그램
+
+```mermaid
+flowchart TB
+    subgraph Internet["🌐 Internet"]
+        User["👤 일반 사용자"]
+        Attacker["☠️ 공격자"]
+    end
+
+    subgraph Tailscale["🔐 Tailscale VPN (100.64.0.0/10)"]
+        Dev["👨‍💻 개발자"]
+        CICD["🔄 GitHub Actions"]
+    end
+
+    subgraph AWS["☁️ AWS VPC (10.0.0.0/16)"]
+        subgraph PublicSubnet["Public Subnet"]
+            SG["🛡️ Security Group"]
+
+            subgraph EC2["EC2 Instance"]
+                Nginx["Nginx\n:80/:443"]
+                Backend["Spring Boot\n:8080 ⛔"]
+                Frontend["Next.js\n:3000 ⛔"]
+                AI["FastAPI\n:5000 ⛔"]
+                DB["MySQL\n:3306 🔒"]
+            end
+        end
+
+        SSM["📡 SSM\n(백업 접근)"]
+    end
+
+    User -->|"HTTPS"| SG
+    Attacker -.->|"❌ 차단"| SG
+
+    SG -->|"허용"| Nginx
+    Nginx -->|"내부"| Backend
+    Nginx -->|"내부"| Frontend
+    Backend -->|"내부"| AI
+    Backend -->|"내부"| DB
+
+    Dev -->|"SSH/DB/Grafana"| EC2
+    CICD -->|"배포"| EC2
+    CICD -.->|"장애시"| SSM
+    SSM -.->|"Run Command"| EC2
+
+    style Attacker fill:#ff6b6b,color:#fff
+    style SG fill:#4ecdc4,color:#fff
+    style Tailscale fill:#6c5ce7,color:#fff
+    style SSM fill:#fdcb6e,color:#000
+```
+
+### 접근 제어 매트릭스
+
+| 접근 경로 | 일반 사용자 | 개발자 (Tailscale) | CI/CD | 공격자 |
+|-----------|:-----------:|:------------------:|:-----:|:------:|
+| HTTP/HTTPS (:80/443) | ✅ | ✅ | ✅ | ✅ → WAF |
+| SSH (:22) | ❌ | ✅ | ✅ | ❌ |
+| MySQL (:3306) | ❌ | ✅ | ❌ | ❌ |
+| Spring Boot (:8080) | ❌ | ❌ | ❌ | ❌ |
+| Grafana (:3001) | ❌ | ✅ | ❌ | ❌ |
+
+### 보안 레이어 (Defense in Depth)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Layer 1: Network Access Control                                │
+│  ├─ Tailscale VPN → Zero Trust Network Access (ZTNA)           │
+│  ├─ Security Group → Instance-level firewall                    │
+│  └─ NACL → Subnet-level firewall (Phase 2)                     │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 2: Identity & Access Management                          │
+│  ├─ OIDC → Keyless CI/CD authentication                        │
+│  ├─ IAM Roles → Least privilege principle                       │
+│  └─ SSM Session Manager → Audited server access                │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 3: Secrets Management                                    │
+│  ├─ GitHub Secrets → CI/CD credentials (Tailscale OAuth 등)    │
+│  └─ SSM Parameter Store (SecureString) → All app secrets       │
+│      ├─ /billage/{env}/db/password (암호화)                    │
+│      ├─ /billage/{env}/jwt/secret (암호화)                     │
+│      └─ /billage/{env}/api-keys/* (암호화)                     │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 4: Application Security                                  │
+│  ├─ Nginx Reverse Proxy → Hide backend ports                   │
+│  ├─ Rate Limiting → DDoS mitigation                            │
+│  └─ WAF → OWASP Top 10 protection (Phase 2)                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### CI/CD 보안 파이프라인
+
+```mermaid
+flowchart LR
+    subgraph GitHub["GitHub"]
+        Push["📝 Push"]
+        Secrets["🔑 Secrets"]
+    end
+
+    subgraph Actions["GitHub Actions"]
+        OIDC["🎫 OIDC Token"]
+        Tailscale["🔐 Tailscale"]
+        Deploy["🚀 Deploy"]
+    end
+
+    subgraph AWS["AWS"]
+        STS["IAM STS"]
+        SSM_Backup["SSM\n(백업)"]
+        EC2_Target["EC2"]
+    end
+
+    Push --> OIDC
+    Secrets --> Tailscale
+    OIDC -->|"임시 자격증명\n(1시간)"| STS
+    Tailscale -->|"VPN 연결"| Deploy
+    STS --> Deploy
+    Deploy -->|"SSH"| EC2_Target
+    Deploy -.->|"장애시"| SSM_Backup
+    SSM_Backup -.-> EC2_Target
+
+    style OIDC fill:#00b894,color:#fff
+    style Tailscale fill:#6c5ce7,color:#fff
+```
+
+### 보안 개선 효과 (Before → After)
+
+| 항목 | Before | After | 개선 효과 |
+|------|--------|-------|-----------|
+| SSH 접근 | `0.0.0.0/0` | Tailscale Only | 공격 표면 99% ↓ |
+| DB 접근 | `0.0.0.0/0` | Tailscale Only | SQL Injection 직접 공격 차단 |
+| AWS 인증 | Access Key (영구) | OIDC Token (1시간) | 자격증명 유출 위험 제거 |
+| 백엔드 포트 | 외부 노출 | localhost only | Actuator/Swagger 노출 방지 |
+| 장애 대응 | 단일 경로 | SSM 백업 경로 | SPOF 제거 |
+
+### 실제 탐지된 공격 (운영 로그 기반)
+
+```log
+# Git 저장소 탈취 시도
+216.81.245.109 - "GET /.git/config HTTP/1.1" 404 ← 차단됨
+
+# ThinkPHP RCE 공격 (CVE-2018-20062)
+98.88.247.68 - "GET /?s=/Index/\think\app/invokefunction..." 200 ← 대상 아님
+
+# Spring Boot Actuator 스캔
+98.88.247.68 - "GET /actuator/env HTTP/1.1" 404 ← Nginx에서 차단
+```
+
+> 📖 상세 분석: [Security Analysis](context/docs/SECURITY_ANALYSIS.md) | [Decision Log](context/docs/SECURITY_DECISION_LOG.md)
+
+### 보안 권장사항
+
+1. **SSH 접근 제한**: `ssh_allowed_cidr`를 Tailscale CIDR (`100.64.0.0/10`)로 제한
+2. **DB 접근 제한**: Tailscale 네트워크에서만 접근 허용
 3. **키페어 관리**: .pem 파일은 절대 Git에 커밋하지 않음
 4. **tfvars 관리**: `terraform.tfvars`는 .gitignore에 포함
+5. **OIDC 사용**: CI/CD에서 장기 Access Key 대신 OIDC 사용
 
 ## 🔄 협업 워크플로우 (GitHub Flow)
 

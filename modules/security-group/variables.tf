@@ -38,6 +38,21 @@ variable "monitoring_allowed_cidr" {
   default     = ["0.0.0.0/0"]  # 개발 단계, 운영 시 관리자 IP로 제한 권장
 }
 
+#==============================================================================
+# Tailscale VPN 설정
+#==============================================================================
+variable "enable_tailscale" {
+  description = "Tailscale VPN 사용 여부 - true일 경우 SSH/DB/Monitoring 접근을 Tailscale 네트워크로 제한"
+  type        = bool
+  default     = false
+}
+
+variable "tailscale_cidr" {
+  description = "Tailscale VPN CIDR (CGNAT 대역)"
+  type        = string
+  default     = "100.64.0.0/10"
+}
+
 variable "management_scrape_cidr" {
   description = "Management VPC Prometheus 접근 허용 CIDR"
   type        = list(string)
