@@ -1,0 +1,8 @@
+# shared/elasticache/dev/terraform.tfvars.example
+# 실제 사용 시 terraform.tfvars로 복사
+
+#==============================================================================
+# ElastiCache 설정 (Dev: 최소 스펙)
+#==============================================================================
+node_type       = "cache.t4g.micro"
+num_cache_nodes = 1
