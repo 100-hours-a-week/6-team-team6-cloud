@@ -1,20 +1,22 @@
 # envs/dev/main.tf
 # Dev 환경 인프라 구성
-# 
+#
 # 1단계: Big Bang 배포 - 단일 인스턴스 (FE + BE + DB + AI)
 # 대상: 카카오 재직자 500명 MAU, 50명 동시접속
 
 #==============================================================================
-# VPC 모듈
+# VPC 참조 (shared/network/dev에서 생성)
 #==============================================================================
-module "vpc" {
-  source = "../../../modules/vpc"
+data "aws_vpc" "main" {
+  tags = {
+    Name = "${var.project_name}-${var.env}-vpc"
+  }
+}
 
-  project_name       = var.project_name
-  env                = var.env
-  vpc_cidr           = var.vpc_cidr
-  public_subnet_cidr = var.public_subnet_cidr
-  availability_zone  = var.availability_zone
+data "aws_subnet" "public" {
+  tags = {
+    Name = "${var.project_name}-${var.env}-public-subnet"
+  }
 }
 
 #==============================================================================
@@ -25,7 +27,7 @@ module "security_group" {
 
   project_name            = var.project_name
   env                     = var.env
-  vpc_id                  = module.vpc.vpc_id
+  vpc_id                  = data.aws_vpc.main.id
   vpc_cidr                = var.vpc_cidr
   ssh_allowed_cidr        = var.ssh_allowed_cidr
   db_allowed_cidr         = var.db_allowed_cidr
@@ -51,7 +53,7 @@ module "ec2_main" {
   instance_name      = "main-server"
   instance_role      = "monitoring-target"
   instance_type      = var.instance_type
-  subnet_id          = module.vpc.public_subnet_id
+  subnet_id          = data.aws_subnet.public.id
   security_group_ids = [
     module.security_group.main_sg_id,
     module.security_group.monitoring_target_sg_id
@@ -132,7 +134,7 @@ module "ec2_monitoring" {
   instance_name      = "monitoring-server"
   instance_role      = "monitoring-server"
   instance_type      = var.monitoring_instance_type
-  subnet_id          = module.vpc.public_subnet_id
+  subnet_id          = data.aws_subnet.public.id
   security_group_ids = [module.security_group.monitoring_sg_id]
   root_volume_size   = var.monitoring_root_volume_size
 
