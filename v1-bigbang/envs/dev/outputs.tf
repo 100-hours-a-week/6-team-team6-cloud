@@ -2,21 +2,21 @@
 # 인프라 정보 출력
 
 #==============================================================================
-# VPC 정보
+# VPC 정보 (shared/network/dev에서 참조)
 #==============================================================================
 output "vpc_id" {
   description = "VPC ID"
-  value       = module.vpc.vpc_id
+  value       = data.aws_vpc.main.id
 }
 
 output "vpc_cidr" {
   description = "VPC CIDR"
-  value       = module.vpc.vpc_cidr
+  value       = data.aws_vpc.main.cidr_block
 }
 
 output "public_subnet_id" {
   description = "Public Subnet ID"
-  value       = module.vpc.public_subnet_id
+  value       = data.aws_subnet.public.id
 }
 
 #==============================================================================

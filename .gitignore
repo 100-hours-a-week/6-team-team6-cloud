@@ -66,4 +66,3 @@ credentials
 monitoring/**/exporter.cnf
 monitoring/**/init_exporter.sql
 **/promtail/positions/
-/context

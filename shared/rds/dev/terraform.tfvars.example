@@ -1,0 +1,17 @@
+# shared/rds/dev/terraform.tfvars.example
+# password는 terraform apply 시 직접 입력
+
+#==============================================================================
+# RDS 설정 (Dev: 최소 스펙)
+#==============================================================================
+instance_class        = "db.t4g.micro"
+allocated_storage     = 20
+max_allocated_storage = 50
+multi_az              = false
+
+db_name  = "billage"
+username = "billage_admin"
+# password는 apply 시 프롬프트로 입력 (보안상 파일에 저장 안함)
+
+deletion_protection = false
+skip_final_snapshot = true
