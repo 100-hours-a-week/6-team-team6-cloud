@@ -1,0 +1,43 @@
+# ==========================================
+# Grafana Datasources
+# ==========================================
+
+apiVersion: 1
+
+datasources:
+  # Prometheus (MySQL, Nginx, Node 메트릭)
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+
+  # InfluxDB (K6 부하테스트 메트릭)
+  - name: InfluxDB-K6
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    database: k6
+    isDefault: false
+    editable: false
+
+  # Alertmanager
+  - name: Alertmanager
+    type: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    editable: false
+
+  # CloudWatch (RDS 메트릭) - AWS 자격증명 필요
+  # 환경변수로 AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY 설정
+  - name: CloudWatch
+    type: cloudwatch
+    access: proxy
+    jsonData:
+      authType: keys
+      defaultRegion: ap-northeast-2
+    secureJsonData:
+      accessKey: ${AWS_ACCESS_KEY_ID}
+      secretKey: ${AWS_SECRET_ACCESS_KEY}
+    editable: false

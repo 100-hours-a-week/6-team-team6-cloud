@@ -1,0 +1,6 @@
+# EC2 Source Nginx exporter targets
+- targets:
+    - "10.0.0.10:9113"
+  labels:
+    instance: "nginx-source"
+    role: "source"
