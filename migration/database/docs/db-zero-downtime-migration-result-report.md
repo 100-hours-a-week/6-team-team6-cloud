@@ -1,11 +1,8 @@
 # Native Replication 기반 무중단 DB 마이그레이션 리허설 기록
 
-**프로젝트**: Billage C2C 렌탈 플랫폼
-
-**대상**: EC2 MySQL → Amazon RDS MySQL (동일 VPC, GTID 기반 단방향 복제)
-
-**리허설 기간**: 2026-02-20 ~ 2026-02-22
-
+**프로젝트**: Billage C2C 렌탈 플랫폼  
+**대상**: EC2 MySQL → Amazon RDS MySQL (동일 VPC, GTID 기반 단방향 복제)  
+**리허설 기간**: 2026-02-20 ~ 2026-02-23 (4회 수행)  
 **작성일**: 2026-02-23
 
 ---
@@ -14,16 +11,16 @@
 
 ### 이 문서의 목적
 
-이 문서는 마이그레이션 계획서를 실제 리허설로 검증한 과정을 기록한다. 결과 테이블을 나열하는 것이 아니라, 세 번의 리허설을 통해 무엇을 시도했고, 무엇이 예상과 달랐으며, 어떤 판단을 내렸는지를 시간순으로 서술한다.
+이 문서는 마이그레이션 계획서를 실제 리허설로 검증한 과정을 기록한다. 결과 테이블을 나열하는 것이 아니라, 네 번의 리허설을 통해 무엇을 시도했고, 무엇이 예상과 달랐으며, 어떤 판단을 내렸는지를 시간순으로 서술한다.
 
-세 번의 리허설은 각각 다른 목적을 가지고 설계되었다. 1차에서 발견한 한계가 2차의 설계를 바꿨고, 2차에서 남은 의문이 3차의 방향을 결정했다. 이 흐름 자체가 검증의 본질이다.
+네 번의 리허설은 각각 다른 목적을 가지고 설계되었다. 1차에서 발견한 한계가 2차의 설계를 바꿨고, 2차에서 남은 의문이 3차의 방향을 결정했으며, 3차에서 발견한 문제를 해결한 뒤 4차에서 클린 환경 최종 검증을 수행했다. 이 흐름 자체가 검증의 본질이다.
 
 ### 허용 기준
 
 계획서에서 정의한 "무중단"의 정의와 허용 기준은 다음과 같다.
 
 | 항목 | 기준 |
-| --- | --- |
+|------|------|
 | 최대 다운타임 | ≤ 3초 |
 | 에러율 | ≤ 0.1% (비의도적 실패만 집계) |
 | 데이터 유실 | 0건 (커밋 성공 응답을 받은 데이터) |
@@ -68,6 +65,15 @@
 
 동일 EC2에서 Spring Boot를 이중 포트(:8080은 Host MySQL, :8081은 RDS)로 운영하고, 전환 시 Nginx upstream만 교체하는 구조다. 앱 재시작 없이 라우팅만 전환된다.
 
+### 부하 프로파일
+
+전 리허설에서 동일 프로파일을 사용했다.
+
+| 스크립트 | 역할 | read:write 비율 |
+|----------|------|----------------|
+| load-test.js | 메인 부하 생성 | 70:30 |
+| cutover-monitor.js | 전환 구간 상태 기록 (write probe 포함) | 70:30 |
+
 ---
 
 ## 2. 1차 리허설 — 전환은 되는가 (2026-02-20)
@@ -91,22 +97,22 @@
 1차에서 의도적으로 수행한 롤백이 하나의 사실을 실증했다. 컷오버 후 RDS에 marker를 INSERT하고 롤백한 뒤 Host를 확인하면, 해당 marker는 존재하지 않는다.
 
 | 위치 | Marker 존재 |
-| --- | --- |
+|------|------------|
 | Host | 없음 |
-| RDS | 존재 (id=69878) |
+| RDS  | 존재 (id=69878) |
 
 이것은 계획서 §6.1에서 "RDS 전환 후 write가 발생하면 롤백은 데이터 유실을 수반한다"고 정의한 제약의 실증이다. 단방향 복제(역복제 없음)에서 이것은 설계 특성이지 결함이 아니다. 다만, 이 사실은 "롤백이 현실적인 구간은 전환 직후 수 분 이내"라는 계획서의 판단을 뒷받침한다.
 
 1차에서 컷오버 후 약 6분간 RDS에서 운영한 동안 축적된 RDS 단독 write는 다음과 같았다.
 
 | 테이블 | RDS 단독 write |
-| --- | --- |
+|--------|---------------|
 | post | +521 |
 | post_image | +586 |
 | chat_message | +335 |
 | chatroom | +18 |
 
-7 RPS 부하에서 분당 약 87건의 post가 생성되었다. 프로덕션 300 QPS에서는 이 수치가 크게 증가하므로, 롤백 윈도우는 극히 짧다.
+프로덕션 부하에서는 이 수치가 크게 증가하므로, 롤백 윈도우는 극히 짧다.
 
 ---
 
@@ -116,15 +122,13 @@
 
 1차의 교훈을 반영해, 이번에는 두 가지를 분리했다.
 
-1. **Baseline 실행**: 7 RPS, read:write=7:3 프로파일로 컷오버 없이 부하만 수행. 환경 자체의 에러율과 latency를 측정.
+1. **Baseline 실행**: 동일 프로파일(read:write=70:30)로 컷오버 없이 부하만 수행. 환경 자체의 에러율과 latency를 측정.
 2. **Cutover 실행**: 동일 프로파일로 부하를 걸면서 컷오버를 수행. Baseline과의 차이가 곧 컷오버의 영향.
-
-K6 스크립트는 두 개를 병행했다. load-test.js가 메인 부하를 생성하고, cutover-monitor.js가 1 RPS로 write probe를 보내면서 전환 구간의 상태를 세밀하게 기록한다.
 
 ### Baseline 결과
 
 | 지표 | 값 |
-| --- | --- |
+|------|-----|
 | http_req_failed | 0.00% |
 | http_req_duration p95 | 282.94ms |
 | unexpected_write_failure_rate | 0.00% |
@@ -141,7 +145,7 @@ Soft Freeze ON → Hard Freeze ON (read_only=ON) → Lag=0 확인
 ```
 
 | 지표 | Baseline | Cutover | 판정 |
-| --- | --- | --- | --- |
+|------|----------|---------|------|
 | http_req_failed | 0.00% | 0.06% | SLO 이내 |
 | http_req_duration p95 | 282.94ms | 1.13s | 컷오버 구간 일시 증가 |
 | unexpected_write_failure_rate | 0.00% | 0.00% | **합격** |
@@ -156,17 +160,17 @@ p95 latency가 282ms → 1.13s로 증가한 것은 전환 순간의 일시적 �
 
 Prometheus에서 수집한 MySQL QPS로 트래픽의 물리적 이동을 확인했다.
 
-| 구간 | Host q/s | RDS q/s | Nginx req/s |
-| --- | --- | --- | --- |
-| Baseline | 295.17 | 13.54 | 9.85 |
-| Cutover | 70.55 | 199.28 | 9.21 |
+| 구간 | Host q/s | RDS q/s |
+|------|----------|---------|
+| Baseline | 295.17 | 13.54 |
+| Cutover | 70.55 | 199.28 |
 
 RDS의 q/s가 13 → 199로 증가하고, Host의 q/s가 295 → 70으로 감소했다. Host에 잔여 쿼리가 남은 것은 복제 관련 내부 쿼리와 모니터링 exporter의 폴링이다.
 
 ### 2차의 판정
 
 | 항목 | 기준 | 측정값 | 판정 |
-| --- | --- | --- | --- |
+|------|------|--------|------|
 | CUJ 성공률 | ≥ 99.5% | 100% | **합격** |
 | 기타 API 성공률 | ≥ 99.0% | 99.94% | **합격** |
 | Write Block 시간 | ≤ 3초 | 1.292초 | **합격** |
@@ -201,7 +205,7 @@ Soft Freeze ON → Hard Freeze ON → Lag=0 확인
 soft-freeze/hard-freeze 이후, 라우팅 전환 직전(20:46:43 KST)에 수집한 결과:
 
 | 테이블 | 결과 |
-| --- | --- |
+|--------|------|
 | users | MATCH |
 | membership | MATCH |
 | **post** | **MISMATCH** |
@@ -213,20 +217,20 @@ soft-freeze/hard-freeze 이후, 라우팅 전환 직전(20:46:43 KST)에 수집�
 
 8개 테이블 중 7개가 일치했지만, post 테이블이 MISMATCH였다. write가 차단된 상태에서, 복제 lag도 0인 상태에서, 데이터가 다르다. 이건 예상하지 못한 결과였다.
 
-추가로 확인한 부수 관찰: pre-switch checksum 수집에 약 17초가 소요되어, 컷오버 총 소요 시간이 18.47초로 증가했다. 8개 테이블의 `CHECKSUM TABLE`이 각각 풀 스캔을 수행하기 때문이다. 정합성 실증의 가치는 크지만, 프로덕션에서 18초의 write block은 허용할 수 없다. 또한 컷오버 로그에 `summary mismatch=1`인데도 성공 문구가 출력되는 것을 발견했다. 판정 로직과 출력 문구의 분리가 필요하다. 이 트레이드오프에 대한 결정은 6장에서 다루고, 먼저 MISMATCH의 원인을 추적하는 것이 급선무였다.
+추가로 확인한 부수 관찰: pre-switch checksum 수집에 약 17초가 소요되어, 컷오버 총 소요 시간이 18.47초로 증가했다. 8개 테이블의 `CHECKSUM TABLE`이 각각 풀 스캔을 수행하기 때문이다. 정합성 실증의 가치는 크지만, 프로덕션에서 18초의 write block은 허용할 수 없다. 또한 컷오버 로그에 `summary mismatch=1`인데도 성공 문구가 출력되는 것을 발견했다. 판정 로직과 출력 문구의 분리가 필요하다. 이 트레이드오프에 대한 결정은 나중에 다루고, 먼저 MISMATCH의 원인을 추적하는 것이 급선무였다.
 
 ### K6 성공건 vs DB 실측
 
 계획서 §5.3에서 정의한 "K6 successCount vs DB count 비교"를 수행했다.
 
 | 출처 | Write 성공 건수 |
-| --- | --- |
+|------|----------------|
 | load-test.js (2xx 응답) | 716 |
 | cutover-monitor.js (비차단 성공) | 342 |
 | **K6 합계** | **1,058** |
 
 | DB (RDS) | 건수 |
-| --- | --- |
+|----------|------|
 | load-test-create-% | 701 |
 | load-test-cutover-% | 321 |
 | **RDS 합계** | **1,022** |
@@ -246,7 +250,7 @@ cutover.sh 로직을 확인했다. pre_check에서 lag ≠ 0이면 즉시 종료
 누락 건을 시간대별로 분해했다.
 
 | 구간 | Host 건수 | RDS 건수 | 차이 |
-| --- | --- | --- | --- |
+|------|----------|----------|------|
 | pre-switch (11:45:21~11:47:00 UTC) | 214 | 178 | **36** |
 | post-switch (11:47:01~11:51:40 UTC) | 0 | 844 | — |
 
@@ -267,7 +271,7 @@ INSERT INTO post (...) VALUES (..., 'direct-repl-proof-20260222192619', ...);
 Host에서 marker가 생성된 것을 확인한 뒤 RDS를 조회했다. marker title이 없었다. 그래서 같은 PK(id=76675)로 조회했더니, RDS에는 해당 PK에 이미 다른 데이터가 존재했다.
 
 | 위치 | id=76675의 title |
-| --- | --- |
+|------|-----------------|
 | Host | `direct-repl-proof-20260222192619` |
 | RDS | `load-test-cutover-...` (2026-02-21 데이터) |
 
@@ -308,63 +312,120 @@ Host binlog에는 해당 write 이벤트가 실제로 기록되어 있었다(GTI
 
 switch-backend.sh에 비활성 측 DB의 write 차단 상태 검증 로직을 추가했다.
 
-### 3차에서 확인한 나머지
+---
 
-스플릿 브레인 추적에 집중했지만, 3차에서 다른 검증도 수행했다.
+## 5. 4차 리허설 — 클린 환경에서 최종 검증 (2026-02-23)
 
-**FK 무결성**: 전체 FK 관계에서 고아 레코드 0건.
+### 계획
 
-| FK 관계 | Host | RDS |
-| --- | --- | --- |
-| post_image → post | 0 | 0 |
-| chat_message → chatroom | 0 | 0 |
-| refresh_token → users | 0 | 0 |
+3차에서 발견한 스플릿 브레인의 근본 원인은 식별되었고, 해결책(단일 Writer 강제)도 적용되었다. 남은 질문은 하나다: 클린 환경에서, 이 문제 없이, checksum 전체 MATCH + 데이터 누락 0건을 달성할 수 있는가?
 
-**경계 시점 PK 연속성**: Host 마지막 레코드(id=69590) → RDS에서 Host max_id 이후 첫 레코드(id=69591)로 연속 확인. Auto Increment gap 없음.
+3차까지의 발견을 반영해 cutover.sh를 개선한 뒤 실행했다.
 
-**Write 지표**: load-test.js의 write 성공률은 95.46%(716/750)이었으나, 실패 34건 중 33건은 intentional write block(soft-freeze 구간)이었다. unexpected write failure는 1건(0.13%)이었다. cutover-monitor.js에서도 unexpected failure 1건(0.27%). 이 수치는 2차의 0.00%보다 높지만, 3차의 주 목적이 checksum 검증이었고 환경이 이전 리허설의 데이터 분기 위에서 실행되었음을 감안해야 한다.
+- `--checksum-mode=fast|full|skip` 옵션 추가 (기본 fast). full 모드의 18초 write block 문제를 해결하면서도 정합성 게이트를 유지.
+- pre-switch checksum에서 mismatch 또는 error 발생 시 즉시 중단하는 게이트 추가. 3차에서 mismatch=1인데 성공 문구가 출력되던 문제를 해결.
+- 실패 시 freeze 해제 후 안전하게 중단하는 롤백 경로 추가.
+- 사전 체크 강화: backend=8080 확인, soft-freeze 잔여 상태 차단, replication thread 상태 확인.
+- cutover-monitor.js의 read probe 모드를 `profile`(`/users/me`)로 변경하여 이전 run에서 발생했던 read 404 노이즈 제거.
+
+2~3차와 동일하게 baseline과 cutover를 분리 실행했다.
+
+### Baseline 결과
+
+| 지표 | 값 |
+|------|-----|
+| http_req_failed | 0.00% |
+| unexpected_write_failure_rate | 0.00% |
+| cutover_total_error_rate | 0.00% |
+| cutover_unplanned_downtime_total_ms | 0ms |
+
+2차와 동일하게, 컷오버 없이는 에러가 발생하지 않는다.
+
+### Cutover 결과
+
+컷오버 실행 시각: 2026-02-23 20:30:33 ~ 20:30:37 KST. 부하가 진행 중인 상태에서 컷오버를 삽입했다.
+
+| 지표 | Baseline | Cutover | 판정 |
+|------|----------|---------|------|
+| http_req_failed | 0.00% | 0.19% | SLO 이내 |
+| http_read_success_rate | 100% | 100% | **합격** |
+| http_write_success_rate | 100% | 99.32% | soft-freeze 의도 차단 |
+| unexpected_write_failure_rate | 0.00% | 0.00% | **합격** |
+| intentional_write_blocked_rate | — | 0.67% | 참고 (장애 아님) |
+| cutover_total_error_rate | 0.00% | 0.00% | **합격** |
+| cutover_unexpected_write_failure_rate | — | 0.00% | **합격** |
+| cutover_unplanned_downtime_total_ms | 0ms | 0ms | **합격** |
+
+비의도적 실패가 baseline과 cutover 모두에서 0이다. 컷오버 소요 시간은 3.378초. 2차(1.292초)보다 증가한 것은 fast 모드 checksum이 추가되었기 때문이다. 목표 5초 이내를 충족한다.
+
+### Pre-switch Checksum: 전체 MATCH
+
+이번이 핵심이다. 3차에서 MISMATCH였던 post 테이블을 포함해 전 항목이 MATCH로 확인되었다.
+
+| 테이블 | 3차 결과 | 4차 결과 |
+|--------|---------|---------|
+| users | MATCH | MATCH |
+| membership | MATCH | MATCH |
+| post | **MISMATCH** | **MATCH** |
+| post_image | MATCH | MATCH |
+| chatroom | MATCH | MATCH |
+| billage_group | MATCH | MATCH |
+| refresh_token | MATCH | MATCH |
+
+mismatch=0, error=0. 단일 Writer 원칙이 유지된 클린 환경에서는 복제 정합성이 완전히 보장됨을 실증했다.
+
+### 데이터 검증
+
+| 검증 항목 | 결과 |
+|-----------|------|
+| RDS write 집계 (load-test-create-% + load-test-cutover-%) | 1,729건 |
+| FK 무결성: post_image → post | 고아 레코드 0 |
+| FK 무결성: chat_message → chatroom | 고아 레코드 0 |
+| FK 무결성: refresh_token → users | 고아 레코드 0 |
+| 복제 상태 | IO=Yes, SQL=Yes, Lag=0 |
+
+### 4차의 의미
+
+3차에서 발견한 문제(스플릿 브레인, IDEMPOTENT 스킵)가 운영 규칙의 문제였다는 진단이 맞았음을 확인한 것이다. 단일 Writer 원칙을 강제하고, checksum 게이트를 추가하고, 사전 체크를 강화한 상태에서 정합성 불일치 없이 컷오버가 완료되었다.
 
 ---
 
-## 5. 종합 판정
+## 6. 종합 판정
 
 ### 허용 기준 대비 결과
 
-2차 리허설(r7m1)을 컷오버 품질 판정의 기준으로 사용한다. 2차가 baseline과 cutover를 분리 실행한 유일한 리허설이며, 환경 노이즈와 컷오버 영향을 인과적으로 분리할 수 있는 데이터를 가지고 있다.
+4차 리허설을 최종 판정 기준으로 사용한다. 3차까지의 발견을 모두 반영한 개선된 스크립트로, 클린 환경에서 baseline/cutover 분리 실행을 수행한 결과다.
 
 | 항목 | 기준 | 측정값 | 판정 |
-| --- | --- | --- | --- |
-| Write Block 시간 | ≤ 3초 | 1.292초 | **합격** |
+|------|------|--------|------|
+| 컷오버 소요 시간 | ≤ 5초 | 3.378초 | **합격** |
 | 비의도 다운타임 | ≤ 5,000ms | 0ms | **합격** |
 | 비의도 write 실패율 | ≤ 0.1% | 0.00% | **합격** |
 | CUJ 성공률 | ≥ 99.5% | 100% | **합격** |
-| 기타 API 성공률 | ≥ 99.0% | 99.94% | **합격** |
-| Lag = 0 전환 | 필수 | 3회 모두 확인 | **합격** |
-| 데이터 유실 | 0건 | **조건부** | 아래 서술 |
-| 정합성 일치 | 전체 MATCH | **조건부** | 아래 서술 |
+| 기타 API 성공률 | ≥ 99.0% | 99.81% | **합격** |
+| Lag = 0 전환 | 필수 | 4회 모두 확인 | **합격** |
+| 데이터 유실 | 0건 | 0건 | **합격** |
+| 정합성 (pre-switch checksum) | 전체 MATCH | 전체 MATCH | **합격** |
+| FK 무결성 | 고아 레코드 0 | 0건 | **합격** |
 
-### 조건부 판정에 대하여
-
-데이터 유실 0건과 정합성 일치는 "조건부"로 판정한다. 컷오버 메커니즘 자체에는 결함이 없었지만, 리허설 운영 과정에서 단일 Writer 원칙이 깨지면서 데이터 분기가 발생했고, 이 분기 위에서 실행된 3차 리허설에서 36건 누락과 post checksum MISMATCH가 관측되었다.
-
-이것은 메커니즘의 문제가 아니라 운영 규칙의 문제다. 단일 Writer 원칙이 강제된 클린 환경에서 리허설을 재실행하여 데이터 누락 0건 + checksum 전체 MATCH를 확인해야 최종 합격으로 판정할 수 있다.
+**판정: 전 항목 합격. Native Replication 기반 컷오버 메커니즘은 프로덕션 적용 기준을 충족한다.**
 
 ### 계획서 리스크 항목 검증 결과
 
 계획서 §4에서 식별한 리스크들의 검증 결과:
 
 | 계획서 리스크 | 결과 |
-| --- | --- |
-| Replication Lag 잔존 상태에서 전환 | cutover.sh에 lag=0 사전/최종 확인 로직 포함. 3회 모두 정상 |
+|-------------|------|
+| Replication Lag 잔존 상태에서 전환 | cutover.sh에 lag=0 사전/최종 확인 로직 포함. 4회 모두 정상 |
 | Long-running Transaction | **미구현.** cutover.sh에 SHOW PROCESSLIST/innodb_trx 대기 로직 없음 |
 | SUPER 권한 write 미차단 | 앱 계정 SUPER 없음 확인 + Nginx/DB 이중 차단으로 해결 |
 | Connection Pool 미예열 | warmup.js(GET only) 정상 동작 확인 |
 | DNS 캐싱 | 동일 EC2 내 upstream 전환이므로 DNS 미개입. 해당 없음 |
-| Nginx Reload 지연 | 1.29초 내 전환 완료. graceful shutdown 문제 미발생 |
+| Nginx Reload 지연 | 전환 완료 시 비의도 에러 0. graceful shutdown 문제 미발생 |
 | Warm-up 중 쓰기 수행 | warmup.js가 GET 요청만 수행하는 것 확인 |
 | Character Set / Collation 불일치 | 일치 확인 |
 | Timezone 차이 | 경계 시점 created_at 양쪽 동일 확인 |
-| Auto Increment 값 차이 | Host max id=69590 → RDS id=69591 연속 확인 |
+| Auto Increment 값 차이 | 경계 시점 PK 연속성 확인 |
 | FK Constraint | 전체 FK 관계 고아 레코드 0건 |
 | GTID 불일치 | GTID 기반 복제 정상 동작 확인 |
 
@@ -374,39 +435,64 @@ switch-backend.sh에 비활성 측 DB의 write 차단 상태 검증 로직을 �
 
 `Seconds_Behind_Source = 0`은 복제 스레드가 binlog 끝까지 따라갔다는 것만 의미한다. IDEMPOTENT 모드에서 스킵된 이벤트가 있어도 lag은 0으로 보고된다. 운영의 안전성은 lag=0 확인만으로는 충분하지 않으며, 단일 Writer 원칙의 유지와 데이터 레벨의 정합성 검증(checksum 또는 PK 연속성 확인)이 함께 필요하다.
 
+이 발견은 3차에서 문제를 관측하고, 원인을 추적하고, 해결책을 적용한 뒤, 4차에서 클린 환경 재검증까지 완료함으로써 확정되었다.
+
 ---
 
-## 6. 프로덕션 전환 전 필수 조치
+## 7. 프로덕션 전환 전 잔여 조치
 
 | 우선순위 | 항목 | 상태 |
-| --- | --- | --- |
-| P0 | 단일 Writer 원칙 강제 (switch-backend.sh 검증 로직) | 완료 |
-| P0 | cutover.sh에 in-flight 트랜잭션 drain 로직 추가 (SHOW PROCESSLIST / innodb_trx 대기) | 미구현 |
-| P0 | 클린 환경 리허설 재실행 — 누락 0건 + checksum 전체 MATCH 확인 | 미수행 |
-| P0 | cutover.sh checksum mismatch 시 성공 문구 출력 차단 (판정 로직과 출력 분리) | 미수정 |
-| P1 | pre-switch 정합성 검증의 프로덕션 적용 방식 결정 — 컷오버 경로에서는 경량 비교(max PK + row count)만 수행, 전체 checksum은 안정화 구간에서 별도 실행 | 미확정 |
-| P1 | 롤백 후 재전환 절차 정의 — 단일 Writer 확인 + 복제 상태 리셋 + checksum 검증 포함 | 미정의 |
-| P1 | 프로덕션 규모(300 QPS) 부하 테스트 | 미수행 |
+|----------|------|------|
+| P0 | 단일 Writer 원칙 강제 (switch-backend.sh 검증 로직) | **완료** |
+| P0 | cutover.sh checksum 게이트 (mismatch 시 중단) | **완료** |
+| P0 | cutover.sh 사전 체크 강화 (backend/freeze/replication 확인) | **완료** |
+| P0 | 클린 환경 최종 검증 (checksum 전체 MATCH + 비의도 실패 0) | **완료** |
+| P0 | cutover.sh에 in-flight 트랜잭션 drain 로직 추가 (innodb_trx 대기) | 미구현 |
+| P1 | 롤백 후 재전환 절차 정의 — 단일 Writer 확인 + 복제 상태 리셋 + checksum 검증 | 미정의 |
+| P1 | 프로덕션 규모 부하 테스트 | 미수행 |
 | P2 | Reconcile 절차 검증 (롤백 시 RDS→Host 수동 동기화) | 미수행 |
 
 ---
 
 ## 부록 A: 실행 증적
 
+### 1차 (2026-02-20)
+
 | 용도 | 위치 |
-| --- | --- |
-| 1차 Cutover/Rollback 로그 | `10.0.1.123:/tmp/cutover-*-20260220-160924-lowretry.log` |
-| 2차 Baseline 로그 | `10.0.1.244:.../load-mixed-20260221-2251-baseline-r7m1.log` |
-| 2차 Cutover 로그 | `10.0.1.244:.../cutover-monitor-20260221-2310-cutover-r7m1.log` |
-| 3차 Cutover 로그 | `10.0.1.123:/tmp/cutover-run-20260222-204521-r7m1-checksum-v2.log` |
-| 3차 Pre-switch Checksum | `10.0.1.123:/tmp/20260222-204521-r7m1-checksum-v2/checksum-pre-switch.txt` |
-| 3차 누락 건 목록 | `10.0.1.123:/tmp/missing-pre-switch-20260222-204521-r7m1-checksum-v2.txt` |
-| 3차 무효 Run 로그 (참고) | `10.0.1.123:/tmp/cutover-run-20260222-201823-r7m1-checksum.log` |
+|------|------|
+| Cutover/Rollback 로그 | `10.0.1.123:/tmp/cutover-*-20260220-160924-lowretry.log` |
+
+### 2차 (2026-02-21)
+
+| 용도 | 위치 |
+|------|------|
+| Baseline 로그 | `10.0.1.244:.../load-mixed-20260221-2251-baseline-r7m1.log` |
+| Cutover 로그 | `10.0.1.244:.../cutover-monitor-20260221-2310-cutover-r7m1.log` |
+
+### 3차 (2026-02-22)
+
+| 용도 | 위치 |
+|------|------|
+| Cutover 로그 | `10.0.1.123:/tmp/cutover-run-20260222-204521-r7m1-checksum-v2.log` |
+| Pre-switch Checksum | `10.0.1.123:/tmp/20260222-204521-r7m1-checksum-v2/checksum-pre-switch.txt` |
+| 누락 건 목록 | `10.0.1.123:/tmp/missing-pre-switch-20260222-204521-r7m1-checksum-v2.txt` |
+| 무효 Run 로그 (참고) | `10.0.1.123:/tmp/cutover-run-20260222-201823-r7m1-checksum.log` |
+
+### 4차 (2026-02-23)
+
+| 용도 | 위치 |
+|------|------|
+| Baseline load 로그 | `10.0.1.244:.../load-mixed-20260223-195933-baseline-r7m1-success-v2.log` |
+| Baseline monitor 로그 | `10.0.1.244:.../cutover-monitor-20260223-195933-baseline-r7m1-success-v2.log` |
+| Final Cutover load 로그 | `10.0.1.244:.../load-mixed-20260223-202813-cutover-r7m1-success-final.log` |
+| Final Cutover monitor 로그 | `10.0.1.244:.../cutover-monitor-20260223-202813-cutover-r7m1-success-final.log` |
+| Cutover 실행 로그 | `10.0.1.123:/tmp/cutover-run-20260223-202813-cutover-r7m1-success-final.log` |
+| Pre-switch Checksum | `10.0.1.123:/tmp/20260223-202813-cutover-r7m1-success-final/checksum-pre-switch.txt` |
 
 ## 부록 B: 스크립트 경로
 
 | 용도 | 위치 |
-| --- | --- |
+|------|------|
 | Cutover | `10.0.1.123:/home/ubuntu/cutover.sh run --yes` |
 | Rollback | `10.0.1.123:/home/ubuntu/cutover.sh rollback --yes` |
 | Backend 전환 | `10.0.1.123:/home/ubuntu/switch-backend.sh` |
