@@ -1,0 +1,6 @@
+# EC2 Source MySQL exporter targets
+- targets:
+    - "${SOURCE_SERVER_IP}:9104"
+  labels:
+    instance: "mysql-source"
+    role: "source"
