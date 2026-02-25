@@ -1,0 +1,6 @@
+# EC2 Source Node exporter targets
+- targets:
+    - "10.0.0.10:9100"
+  labels:
+    instance: "node-source"
+    role: "source"

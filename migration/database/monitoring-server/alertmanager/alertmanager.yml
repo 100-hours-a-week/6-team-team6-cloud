@@ -1,0 +1,12 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default-log
+  group_by: ['alertname', 'instance', 'job']
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 30m
+
+receivers:
+  - name: default-log
