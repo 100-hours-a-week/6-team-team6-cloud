@@ -31,9 +31,17 @@ services:
     container_name: mysql-exporter
     network_mode: host
     restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - DATA_SOURCE_NAME=${MYSQL_EXPORTER_USER}:${MYSQL_EXPORTER_PASSWORD}@tcp(127.0.0.1:${MYSQL_PORT})/
+    volumes:
+      - ./mysql/exporter.cnf:/.my.cnf
     command:
+      - '--config.my-cnf=/.my.cnf'
       - '--web.listen-address=:9104'
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.4.2
+    container_name: nginx-exporter
+    network_mode: host
+    restart: unless-stopped
+    command:
+      - '--nginx.scrape-uri=${NGINX_SCRAPE_URI:-http://127.0.0.1/nginx_status}'
+      - '--web.listen-address=:9113'
