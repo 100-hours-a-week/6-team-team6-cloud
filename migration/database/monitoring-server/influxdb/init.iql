@@ -1,0 +1,2 @@
+-- K6 database retention policy: 7 days
+CREATE RETENTION POLICY "7d" ON "k6" DURATION 7d REPLICATION 1 DEFAULT

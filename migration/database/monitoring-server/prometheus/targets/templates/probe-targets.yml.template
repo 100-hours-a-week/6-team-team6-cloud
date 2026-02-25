@@ -1,0 +1,6 @@
+# Blackbox probe targets (HTTP 2xx expected)
+# PROBE_BASE_URL example: http://test.billages.com/api
+- targets:
+    - "${PROBE_BASE_URL}/actuator/health"
+  labels:
+    service: "app-health"

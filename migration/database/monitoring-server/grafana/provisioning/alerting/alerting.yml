@@ -1,0 +1,34 @@
+# ==========================================
+# Grafana Alerting Provisioning
+# Discord webhook 설정 시 알림 전송
+# ==========================================
+#
+# DISCORD_WEBHOOK_URL 환경변수가 설정되지 않으면
+# 알림이 발송되지 않음 (Grafana UI에서만 확인 가능)
+#
+# Discord webhook 생성:
+#   서버 설정 > 연동 > 웹후크 > 새 웹후크
+# ==========================================
+
+apiVersion: 1
+
+# Discord webhook 전용 contact point
+contactPoints:
+  - orgId: 1
+    name: discord-default
+    receivers:
+      - uid: discord-default-receiver
+        type: discord
+        settings:
+          url: "https://discord.com/api/webhooks/1471757922114470003/LAtxjpPfo9Fvj_ekMntnPVpaPwlL-z3cMQVkou6NLp3MFyobDb3A8yVOnVfbpayWumhX"
+          title: "{{ template \"default.title\" . }}"
+          message: "{{ template \"default.message\" . }}"
+        disableResolveMessage: false
+
+policies:
+  - orgId: 1
+    receiver: discord-default
+    group_by: ['alertname', 'instance']
+    group_wait: 10s
+    group_interval: 30s
+    repeat_interval: 30m
