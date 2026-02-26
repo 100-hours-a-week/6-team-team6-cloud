@@ -88,13 +88,88 @@ data "aws_vpc_peering_connection" "management" {
   }
 }
 
-# Private Route Table - 0.0.0.0/0 → VPC Peering (VPN Server NAT 경유)
+# NAT Instance (Private Subnet 인터넷 접근용)
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-*-x86_64"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+resource "aws_security_group" "nat" {
+  name        = "${var.project_name}-${var.env}-v2-nat-sg"
+  description = "Security group for NAT instance"
+  vpc_id      = data.aws_vpc.existing.id
+
+  ingress {
+    description = "All from Private Subnets"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [var.private_subnet_cidr_a, var.private_subnet_cidr_c]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-${var.env}-v2-nat-sg"
+  }
+}
+
+resource "aws_instance" "nat" {
+  ami                    = data.aws_ami.amazon_linux.id
+  instance_type          = "t3.nano" # ~$3.80/월
+  subnet_id              = data.aws_subnet.public.id
+  vpc_security_group_ids = [aws_security_group.nat.id]
+  source_dest_check      = false # NAT Instance 필수
+  key_name               = var.key_name
+
+  user_data = <<-USERDATA
+    #!/bin/bash
+    set -e
+    # IP forwarding 활성화
+    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+    sysctl -w net.ipv4.ip_forward=1
+
+    # iptables NAT 설정
+    PUB_IF=$(ip route | grep default | awk '{print $5}')
+    iptables -t nat -A POSTROUTING -o $PUB_IF -s ${var.private_subnet_cidr_a} -j MASQUERADE
+    iptables -t nat -A POSTROUTING -o $PUB_IF -s ${var.private_subnet_cidr_c} -j MASQUERADE
+    iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    iptables -A FORWARD -s ${var.private_subnet_cidr_a} -o $PUB_IF -j ACCEPT
+    iptables -A FORWARD -s ${var.private_subnet_cidr_c} -o $PUB_IF -j ACCEPT
+
+    # iptables 영구 저장
+    yum install -y iptables-services 2>/dev/null || true
+    iptables-save > /etc/sysconfig/iptables 2>/dev/null || true
+    systemctl enable iptables 2>/dev/null || true
+  USERDATA
+
+  tags = {
+    Name = "${var.project_name}-${var.env}-v2-nat-instance"
+  }
+}
+
+# Private Route Table - 0.0.0.0/0 → NAT Instance
 resource "aws_route_table" "private" {
   vpc_id = data.aws_vpc.existing.id
 
   route {
-    cidr_block                = "0.0.0.0/0"
-    vpc_peering_connection_id = data.aws_vpc_peering_connection.management.id
+    cidr_block           = "0.0.0.0/0"
+    network_interface_id = aws_instance.nat.primary_network_interface_id
   }
 
   route {
@@ -157,7 +232,7 @@ resource "aws_route_table_association" "public_c" {
 }
 
 # Private Route Table (RDS용)은 shared/rds/dev에서 별도 생성
-# Private Route Table (EC2용)은 위에서 생성 - VPN NAT 경유 인터넷 접근
+# Private Route Table (EC2용)은 위에서 생성 - NAT Instance 경유 인터넷 접근
 
 #==============================================================================
 # Security Groups

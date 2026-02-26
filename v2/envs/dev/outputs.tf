@@ -91,6 +91,19 @@ output "security_group_ids" {
 }
 
 #==============================================================================
+# NAT Instance
+#==============================================================================
+output "nat_instance_id" {
+  description = "NAT Instance ID"
+  value       = aws_instance.nat.id
+}
+
+output "nat_instance_private_ip" {
+  description = "NAT Instance Private IP"
+  value       = aws_instance.nat.private_ip
+}
+
+#==============================================================================
 # IAM
 #==============================================================================
 output "app_role_arn" {
