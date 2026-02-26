@@ -352,19 +352,25 @@ M2 (RDS + Redis) ────┐    │
 
 ### M7. MySQL → RDS 마이그레이션
 
-**목표**: v1 호스트 MySQL 데이터를 RDS로 이전 (최소 중단)
+**목표**: v1 호스트 MySQL 데이터를 RDS로 이전 (GTID Replica 기반, Write Freeze 최소화)
 **선행 조건**: M2 (RDS 생성), M4 (v2 앱이 RDS 연결 가능)
 **소요**: 3-4일 (리허설 포함)
 
+**현황 (2026-02-13 기준)**:
+- 전략 단일화 완료: GTID auto-position 기반 Replica 전환
+- 리허설 환경 준비 완료: EC2/RDS/시딩/WAS 이중 구성/Nginx 스위칭
+- 미완료: Round 실측 기록 정리, Prod 컷오버 실행
+
 #### 태스크
 
-- [ ] **7.1 마이그레이션 방식 결정**
-  - Option A: mysqldump + 짧은 점검 (5-10분) — 단순, 현재 규모에 적합
-  - Option B: AWS DMS (CDC) — 거의 무중단, 설정 복잡
-  - 의사결정 근거 기록 (포트폴리오용)
+- [x] **7.1 마이그레이션 방식 결정**
+  - 최종 전략: **GTID auto-position 기반 MySQL Replication**
+  - 기준 문서: `context/migration/01-db-migration.md`, `context/migration/db-migration-runbook.md`
+  - 의사결정 근거 기록 완료 (포트폴리오 반영)
 
 - [ ] **7.2 리허설 1차 (Dev 환경)**
   - Dev 호스트 MySQL → Dev RDS 마이그레이션 실행
+  - 현재 상태: **리허설 환경 준비 완료, 실측 결과표 미기입**
   - Runbook 작성:
     - 사전: DB 백업, 데이터 크기/테이블 수/총 Row 기록
     - Step 1: 스키마 마이그레이션 → 소요 시간 기록
@@ -378,6 +384,7 @@ M2 (RDS + Redis) ────┐    │
   - 각 테이블 Row count 비교
   - 외래키 무결성 검사 (고아 레코드 확인)
   - 최근 데이터 샘플링 (채팅 메시지 등 핵심 데이터)
+  - 현재 상태: **런북 내 검증 명령 존재, 독립 실행 스크립트화 미완료**
 
 - [ ] **7.4 리허설 2차 (이슈 수정 후)**
   - 1차 이슈 수정 반영

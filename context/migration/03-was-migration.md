@@ -360,27 +360,15 @@ curl -f http://localhost:8080/actuator/health || exit 1
   - `spring.datasource.hikari.connection-timeout=10000`
   - `spring.datasource.hikari.max-lifetime=600000`
 
-#### 4.1.5 Redis 신규 추가
+#### 4.1.5 ElastiCache Redis (선택사항, 향후 캐시 레이어용)
 
 **현재**: 없음
-**v2**: ElastiCache Redis (optional but recommended for session, caching)
+**v2**: ElastiCache Redis (나중에 캐시 레이어로 추가 가능, JWT 기반 stateless 인증이므로 세션 저장소 불필요)
 
-**구성 (300K MAU)**
-```
-ElastiCache Redis 클러스터:
-├── Engine: Redis 7.0
-├── Node type: cache.t4g.small (1.37GB) [Dev] / cache.t4g.medium (3.09GB) [Prod]
-├── Num cache nodes: 1 (dev), 2 [Prod with replication]
-├── Automatic failover: disabled (dev) / enabled (prod)
-└── Security Group: EC2 ASG에서 6379 허용
-```
-
-**Spring Boot 설정**
-```
-spring.redis.host=${SPRING_REDIS_HOST}
-spring.redis.port=${SPRING_REDIS_PORT}
-spring.session.store-type=redis
-```
+**참고**:
+- Spring Session Redis는 필요 없음 (JWT 토큰 기반 stateless 인증 사용)
+- Redis는 향후 채팅 메시지 일시 저장소 또는 일반 캐싱용으로만 사용 (Phase 2에서 상세)
+- 현재 Phase 1 (WAS 마이그레이션)에서는 Redis 도입 불필요
 
 #### 4.1.6 Health Check 전략
 

@@ -58,11 +58,11 @@ v2 마이그레이션은 Auto Scaling Group 기반의 동적 인스턴스 풀로
 
 ### 3.2 클라우드 네이티브 메트릭 통합
 
-v2 인프라는 Application Load Balancer, RDS, ElastiCache Redis를 사용하므로, 이들 AWS 관리형 서비스의 메트릭을 CloudWatch를 통해 수집한다. ALB는 RequestCount, ResponseTime, HTTPCode_Target_5XX, HealthyHostCount를 노출하고, RDS는 DatabaseConnections, Queries, CPUUtilization, FreeableMemory, ReadIOPS, DiskQueueDepth를 제공한다. Redis(ElastiCache)는 CurrConnections, CacheHitRate, EngineCPUUtilization, FreeableMemory, PublishedSubscriptionChannels를 메트릭으로 제공한다.
+v2 인프라는 Application Load Balancer, RDS, RabbitMQ를 사용하므로, 이들 AWS 관리형 서비스의 메트릭을 CloudWatch를 통해 수집한다. ALB는 RequestCount, ResponseTime, HTTPCode_Target_5XX, HealthyHostCount를 노출하고, RDS는 DatabaseConnections, Queries, CPUUtilization, FreeableMemory, ReadIOPS, DiskQueueDepth를 제공한다. RabbitMQ (Phase 2에서 도입, 현재 선택사항)는 Queue Depth, Consumer Count, Publish Rate, Memory Usage를 메트릭으로 제공할 예정이다.
 
 ### 3.3 통합 대시보드 및 알림
 
-기존 v1 대시보드는 유지되며, v2 전용 대시보드가 새로 생성된다. 마이그레이션 기간 동안 v1과 v2 트래픽, 에러율, 응답시간을 비교하는 임시 대시보드가 의사결정 기준이 된다. 알림 규칙은 v2 특화 조건(ASG 스케일 한계 도달, 컨테이너 재시작 빈도, RDS 메모리 압박, Redis 연결 수 포화)을 포함하도록 확대된다.
+기존 v1 대시보드는 유지되며, v2 전용 대시보드가 새로 생성된다. 마이그레이션 기간 동안 v1과 v2 트래픽, 에러율, 응답시간을 비교하는 임시 대시보드가 의사결정 기준이 된다. 알림 규칙은 v2 특화 조건(ASG 스케일 한계 도달, 컨테이너 재시작 빈도, RDS 메모리 압박)을 포함하도록 확대된다. Phase 2에서 RabbitMQ가 도입되면 Queue Depth, Consumer Count 모니터링도 추가할 예정이다.
 
 ---
 
@@ -112,7 +112,7 @@ v1의 mysql-exporter(포트 9104)는 마스터 데이터베이스로부터 직�
 
 Grafana에 새로운 데이터소스를 추가한다. 데이터소스 유형은 CloudWatch이며, AWS 인증 방식으로 IAM 역할을 사용한다. Prometheus EC2 인스턴스에 IAM 인스턴스 프로필을 할당하고, 해당 역할에 cloudwatch:GetMetricData, cloudwatch:ListMetrics, ec2:DescribeInstances 권한을 부여한다.
 
-이 데이터소스를 통해 ALB, RDS, ElastiCache, ASG의 메트릭을 Grafana 대시보드에 직접 시각화할 수 있다.
+이 데이터소스를 통해 ALB, RDS, ASG의 메트릭을 Grafana 대시보드에 직접 시각화할 수 있다. Phase 2에서 RabbitMQ 도입 시 RabbitMQ management API 데이터소스도 추가할 예정이다.
 
 ### 5.5 Promtail 설정 변경
 
@@ -207,7 +207,7 @@ v2 환경 특화 알림:
 
 - RDS DatabaseConnections > 80% of max_connections: 데이터베이스 연결 풀 포화 임박. 의미: 새로운 데이터베이스 연결 수락 불가능 위험. 심각도: 높음(Critical). 대응: 연결 풀 설정 검토, 데이터베이스 인스턴스 업그레이드.
 
-- Redis Memory > 80%: ElastiCache Redis의 메모리 사용률 80% 초과. 의미: 캐시 제거(eviction) 시작 임박, 캐시 효율성 감소. 심각도: 중간(Warning). 대응: 캐시 정책 검토, 노드 크기 증가.
+- RabbitMQ Queue Depth > 100K: RabbitMQ 큐의 미처리 메시지 수 100,000 초과. 의미: 메시지 처리 지연, 메모리 부족 임박. 심각도: 중간(Warning). 대응: Consumer 확인, 처리 속도 개선 (Phase 2). 현재 Phase 1에서는 미적용.
 
 ### 7.3 알림 전달 채널
 
