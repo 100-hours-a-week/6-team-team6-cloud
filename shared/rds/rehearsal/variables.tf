@@ -1,4 +1,4 @@
-# shared/rds/dev/variables.tf
+# shared/rds/rehearsal/variables.tf
 
 variable "aws_region" {
   description = "AWS Region"
@@ -24,13 +24,13 @@ variable "env" {
 variable "private_subnet_cidr_a" {
   description = "Private Subnet CIDR (AZ-a)"
   type        = string
-  default     = "10.0.12.0/24"
+  default     = "10.0.10.0/24"
 }
 
 variable "private_subnet_cidr_c" {
   description = "Private Subnet CIDR (AZ-c)"
   type        = string
-  default     = "10.0.13.0/24"
+  default     = "10.0.11.0/24"
 }
 
 #==============================================================================
@@ -57,7 +57,7 @@ variable "max_allocated_storage" {
 variable "multi_az" {
   description = "Multi-AZ 배포"
   type        = bool
-  default     = false
+  default     = false # Dev는 Single-AZ
 }
 
 variable "db_name" {
@@ -81,11 +81,11 @@ variable "password" {
 variable "deletion_protection" {
   description = "삭제 보호"
   type        = bool
-  default     = false
+  default     = false # Dev는 비활성화
 }
 
 variable "skip_final_snapshot" {
   description = "최종 스냅샷 스킵"
   type        = bool
-  default     = true
+  default     = true # Dev는 스킵
 }

@@ -30,7 +30,7 @@ variable "domain_name" {
 
 #==============================================================================
 # 네트워크 설정
-# Private Subnets은 shared/rds/dev에서 생성
+# Private Subnets (RDS용)은 shared/rds/dev에서 생성
 #==============================================================================
 variable "public_subnet_cidr_c" {
   description = "Public Subnet CIDR (AZ-c) - ALB용"
@@ -38,10 +38,28 @@ variable "public_subnet_cidr_c" {
   default     = "10.0.2.0/24"
 }
 
+variable "private_subnet_cidr_a" {
+  description = "Private Subnet CIDR (AZ-a) - EC2용"
+  type        = string
+  default     = "10.0.20.0/24"
+}
+
+variable "private_subnet_cidr_c" {
+  description = "Private Subnet CIDR (AZ-c) - EC2용"
+  type        = string
+  default     = "10.0.21.0/24"
+}
+
+variable "management_vpc_cidr" {
+  description = "Management VPC CIDR (VPC Peering 라우팅용)"
+  type        = string
+  default     = "10.2.0.0/16"
+}
+
 variable "vpn_cidr" {
-  description = "VPN CIDR (WireGuard)"
+  description = "VPN 트래픽 소스 CIDR (Masquerade 후 VPN 서버 IP로 도착)"
   type        = list(string)
-  default     = ["10.100.0.0/24"]
+  default     = ["10.2.0.0/16"] # Management VPC CIDR (VPN 서버가 Masquerade하므로)
 }
 
 #==============================================================================
@@ -71,7 +89,7 @@ variable "key_name" {
 variable "backend_instance_type" {
   description = "Backend 인스턴스 타입"
   type        = string
-  default     = "t4g.small" # 2 vCPU, 2GB
+  default     = "t3.small" # 2 vCPU, 2GB (x86_64)
 }
 
 variable "backend_asg_desired" {
@@ -98,7 +116,7 @@ variable "backend_asg_max" {
 variable "frontend_instance_type" {
   description = "Frontend 인스턴스 타입"
   type        = string
-  default     = "t4g.small" # 2 vCPU, 2GB
+  default     = "t3.small" # 2 vCPU, 2GB (x86_64)
 }
 
 variable "frontend_asg_desired" {
@@ -125,7 +143,7 @@ variable "frontend_asg_max" {
 variable "ai_instance_type" {
   description = "AI 인스턴스 타입"
   type        = string
-  default     = "t4g.small" # 2 vCPU, 2GB
+  default     = "t3.small" # 2 vCPU, 2GB (x86_64)
 }
 
 variable "ai_asg_desired" {

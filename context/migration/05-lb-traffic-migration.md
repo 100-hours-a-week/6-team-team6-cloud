@@ -56,14 +56,17 @@ Location /ai/*          → FastAPI (localhost:5000)
 - proxy_pass: upstream 서버로의 프록시 연결
 - proxy_set_header Host: 원본 Host 헤더 유지
 - proxy_set_header X-Forwarded-For: 클라이언트 실제 IP 전달
+- proxy_set_header X-Forwarded-Proto: 프로토콜(HTTP/HTTPS) 전달
 
 ### 2.4 보안 헤더 (Nginx 레벨 추가)
 
-**응답 헤더**
+**응답 헤더** (v1에서는 Nginx 레벨에서 추가)
 - Strict-Transport-Security (HSTS): max-age=31536000; includeSubDomains
 - X-Frame-Options: DENY (클릭잭킹 방지)
 - X-Content-Type-Options: nosniff (MIME 스니핑 방지)
 - X-XSS-Protection: 1; mode=block (XSS 보호, 구형 브라우저)
+
+**참고**: v2에서 ALB는 보안 헤더를 직접 추가하지 않으므로, 애플리케이션 레벨에서 추가 필요 (섹션 4.2 참조)
 
 ### 2.5 HTTP → HTTPS 리다이렉트
 

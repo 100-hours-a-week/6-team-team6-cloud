@@ -2,12 +2,87 @@
 
 ## 개요
 - **서비스**: Billage (렌탈 플랫폼)
-- **목표**: Host MySQL → RDS MySQL 마이그레이션 절차 검증
+- **목표**: Host MySQL → RDS MySQL **무중단** 마이그레이션
 - **대상 부하**: 300K MAU (DAU ~10,000, 동시접속 ~1,000, 피크 RPS ~900)
-- **현재 데이터**: ~500MB-1GB
-- **마이그레이션 전략**: Blue-Green (2개 WAS 인스턴스, 부하 테스트)
-- **문서 버전**: v1.0
+- **마이그레이션 전략**: **MySQL Replication 기반 (Replica Lag 추적 + 최소 Write Freeze)**
+- **문서 버전**: v2.0
 - **작성일**: 2026-02-12
+- **최종 수정**: 2026-02-13
+
+---
+
+## 진행 상황
+
+### 리허설 환경 (2026-02-13 완료)
+
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| 리허설 EC2 | ✅ 완료 | `3.34.162.89` (Terraform 관리) |
+| Host MySQL 시딩 | ✅ 완료 | 1,328만 건, 1.78GB |
+| WAS 8080 (Host) | ✅ 구성 완료 | 기본 라우팅 |
+| WAS 8081 (RDS) | ✅ 구성 완료 | `.env.rds` 환경변수 |
+| Nginx 스위칭 | ✅ 구성 완료 | `/home/ubuntu/switch-backend.sh` |
+| RDS 연결 테스트 | ✅ 완료 | `billage-dev-mysql.cpigi2qskxj3.ap-northeast-2.rds.amazonaws.com` |
+
+### 시딩 데이터 현황
+
+| 테이블 | 건수 | 크기 |
+|--------|------|------|
+| chat_message | **12,000,174** | 776 MB |
+| users | **600,013** | 67 MB |
+| membership | **600,013** | 18.6 MB |
+| post | **60,014** | 5.5 MB |
+| chatroom | **20,039** | 1.5 MB |
+| billage_group | **201** | 0.02 MB |
+| **합계** | **~1,328만 건** | **~1.78 GB** |
+
+---
+
+## 마이그레이션 전략: Replica 기반 무중단 전환
+
+### 왜 Replica 방식인가?
+
+기존 "mysqldump → Write Freeze → Delta 이관" 방식은 쓰기 중단 시간이 길어질 수 있다.
+Replica 방식은 **실시간 동기화**를 통해 Write Freeze 시간을 **수 초 이내**로 최소화한다.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    Replica 기반 무중단 마이그레이션                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Phase 1: 초기 동기화                                                   │
+│  ┌─────────────┐    mysqldump         ┌─────────────┐                  │
+│  │ Host MySQL  │ ──────────────────── │   RDS       │                  │
+│  │ (Source)    │  --single-transaction│ (Replica)   │                  │
+│  └─────────────┘  (GTID set 기록)     └─────────────┘                  │
+│                                                                          │
+│  Phase 2: Replication 시작                                              │
+│  ┌─────────────┐    GTID stream       ┌─────────────┐                  │
+│  │ Host MySQL  │ ═══════════════════▶ │   RDS       │                  │
+│  │ (Source)    │    실시간 동기화     │ (Replica)   │                  │
+│  └─────────────┘                      └─────────────┘                  │
+│        │                                     │                          │
+│        │ Lag 모니터링                        │                          │
+│        │ Seconds_Behind_Source = 0          │                          │
+│        ▼                                     ▼                          │
+│  Phase 3: 전환 (Write Freeze ~5초)                                      │
+│  ┌─────────────┐                      ┌─────────────┐                  │
+│  │ Host MySQL  │ ── 쓰기 중단 ──────▶ │   RDS       │                  │
+│  │ (Source)    │    Lag 0 확인        │ (Primary)   │                  │
+│  └─────────────┘                      └─────────────┘                  │
+│                                              │                          │
+│                                              ▼                          │
+│                                       트래픽 전환                       │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### 핵심 포인트
+
+1. **GTID 기준 복제**: `@@GLOBAL.gtid_executed`를 기준으로 auto-position 복제 시작
+2. **Replication 설정**: RDS를 Host MySQL의 Replica로 구성
+3. **Lag 모니터링**: `SHOW REPLICA STATUS` → `Seconds_Behind_Source`
+4. **전환**: Lag=0 확인 후 수 초간 Write Freeze → 트래픽 전환
 
 ---
 
@@ -167,7 +242,7 @@ aws rds describe-db-instances \
 
 **RDS 접근 가능성 테스트** (리허설 EC2에서):
 ```bash
-ssh -i {your-key} ec2-user@$ELASTIC_IP
+ssh -i {your-key} ubuntu@$ELASTIC_IP
 
 # EC2 내부에서
 mysql -h {RDS_ENDPOINT} -u billage_admin -p -e "SELECT @@version, @@server_id;"
@@ -474,16 +549,75 @@ ORDER BY data_length DESC;
 
 ---
 
-## 1.3 데이터 사전 이관 (Host MySQL → RDS)
+## 1.3 Replica 기반 데이터 이관 (Host MySQL → RDS)
 
-### Step 1.2.1: Host MySQL에서 Dump 생성
+> **핵심**: Position 기반이 아니라 **GTID(auto-position)** 기준으로 복제를 시작한다.
+
+### Step 1.3.0: Host MySQL GTID 설정 확인
+
+**Replication을 위한 필수 설정 확인**:
+```bash
+# 리허설 EC2에서 Host MySQL 설정 확인 (GTID 필수)
+mysql -h localhost -u root -p -e "
+SHOW VARIABLES LIKE 'gtid_mode';
+SHOW VARIABLES LIKE 'enforce_gtid_consistency';
+SHOW VARIABLES LIKE 'log_bin';
+SHOW VARIABLES LIKE 'binlog_format';
+SHOW VARIABLES LIKE 'server_id';
+SELECT @@server_uuid;
+SELECT @@GLOBAL.gtid_executed;
+"
+```
+
+**예상 결과**:
+```
++---------------+-------+
+| Variable_name | Value |
++---------------+-------+
+| gtid_mode     | ON    |   ← 필수!
+| enforce_gtid_consistency | ON | ← 필수!
+| log_bin       | ON    |   ← 필수!
+| binlog_format | ROW   |   ← ROW 권장
+| server_id     | 1     |   ← 0이 아닌 값
++---------------+-------+
+```
+
+**GTID/Replication 설정이 OFF인 경우 활성화** (재시작 필요):
+```bash
+# /etc/mysql/mysql.conf.d/mysqld.cnf 또는 /etc/my.cnf
+[mysqld]
+gtid_mode = ON
+enforce_gtid_consistency = ON
+server-id = 1
+log_bin = /var/log/mysql/mysql-bin.log
+binlog_format = ROW
+binlog_expire_logs_seconds = 604800  # 7일
+max_binlog_size = 100M
+```
+
+```bash
+sudo systemctl restart mysql
+```
+
+**기록**:
+- [ ] gtid_mode: ON / OFF
+- [ ] enforce_gtid_consistency: ON / OFF
+- [ ] log_bin: ON / OFF
+- [ ] binlog_format: ___________
+- [ ] server_id: ___________
+- [ ] source server_uuid: ___________
+- [ ] source gtid_executed: ___________
+
+---
+
+### Step 1.3.1: Host MySQL에서 Dump 생성 (GTID 기준)
 
 **리허설 EC2에 SSH 접속**:
 ```bash
-ssh -i {your-key} ec2-user@$ELASTIC_IP
+ssh -i ~/.ssh/billage-keypair.pem ubuntu@3.34.162.89
 ```
 
-**Dump 생성**:
+**Dump 생성 (`--single-transaction` + `gzip`)**:
 ```bash
 # 시간 기록 시작
 DUMP_START=$(date +%s)
@@ -494,15 +628,16 @@ echo "Dump 시작: $DUMP_START_TIME"
 mysqldump \
   -h localhost \
   -u root \
-  -p{prod-mysql-password} \
+  -p \
   --single-transaction \
+  --quick \
   --routines \
   --triggers \
   --events \
+  --set-gtid-purged=OFF \
   --set-charset \
   --default-character-set=utf8mb4 \
-  --dump-date \
-  billage > /tmp/billage-full.sql
+  billage | gzip -1 > /tmp/billage-replication.sql.gz
 
 # 완료 시간 기록
 DUMP_END=$(date +%s)
@@ -510,20 +645,42 @@ DUMP_END_TIME=$(date '+%Y-%m-%d %H:%M:%S')
 DUMP_DURATION=$((DUMP_END - DUMP_START))
 
 # Dump 파일 크기 확인
-DUMP_SIZE=$(du -sh /tmp/billage-full.sql | cut -f1)
+DUMP_SIZE=$(du -sh /tmp/billage-replication.sql.gz | cut -f1)
 echo "Dump 완료: $DUMP_END_TIME"
 echo "Dump 소요 시간: ${DUMP_DURATION}초"
 echo "Dump 파일 크기: $DUMP_SIZE"
 
+# GTID 기준점 기록 (auto-position 용)
+SOURCE_UUID=$(mysql -h localhost -u root -p -Nse "SELECT @@server_uuid;")
+SOURCE_GTID_EXECUTED=$(mysql -h localhost -u root -p -Nse "SELECT @@GLOBAL.gtid_executed;")
+
+echo "SOURCE_UUID: $SOURCE_UUID"
+echo "SOURCE_GTID_EXECUTED: $SOURCE_GTID_EXECUTED"
+
+cat > /tmp/source-gtid.txt << EOF
+SOURCE_UUID=$SOURCE_UUID
+SOURCE_GTID_EXECUTED=$SOURCE_GTID_EXECUTED
+EOF
+
 # 기록 파일에 저장
 cat >> /tmp/rehearsal-timeline.txt << EOF
-=== Phase 1.2.1: Host MySQL Dump ===
+=== Phase 1.3.1: Host MySQL Dump (GTID) ===
 시작 시각: $DUMP_START_TIME
 종료 시각: $DUMP_END_TIME
 소요 시간: ${DUMP_DURATION}초
 파일 크기: $DUMP_SIZE
+SOURCE_UUID: $SOURCE_UUID
+SOURCE_GTID_EXECUTED: $SOURCE_GTID_EXECUTED
 EOF
 ```
+
+> 참고: 데이터 10GB+ 구간에서는 스키마/데이터 분리, 인덱스/FK 후생성을 별도 리허설 후 적용 검토.
+
+**대용량 이관 성능 메모 (포트폴리오 기록 권장)**:
+- `--single-transaction`: 서비스 중단 없이 일관된 스냅샷 덤프를 보장
+- `gzip`: 덤프 파일 크기/전송 시간 절감(대신 CPU 사용량 증가)
+- 인덱스/FK 후생성: 대용량에서 유리할 수 있으나 운영 복잡도 증가(사전 리허설 필수)
+- GUI 도구(DBeaver 등): 탐색/부분 검증 보조용으로 사용, 운영 컷오버는 CLI 런북 기준
 
 **소요 시간 추정**:
 - 500MB: ~2분
@@ -538,7 +695,7 @@ EOF
 
 ---
 
-### Step 1.2.2: RDS에 Dump 임포트
+### Step 1.3.2: RDS에 Dump 임포트
 
 **RDS Endpoint 확인**:
 ```bash
@@ -560,7 +717,7 @@ mysql \
   -h $RDS_ENDPOINT \
   -u billage_admin \
   -p \
-  billage < /tmp/billage-full.sql
+  billage < <(gunzip -c /tmp/billage-replication.sql.gz)
 
 # 완료
 IMPORT_END=$(date +%s)
@@ -572,7 +729,7 @@ echo "Import 소요 시간: ${IMPORT_DURATION}초"
 
 # 기록
 cat >> /tmp/rehearsal-timeline.txt << EOF
-=== Phase 1.2.2: RDS Import ===
+=== Phase 1.3.2: RDS Import ===
 시작 시각: $IMPORT_START_TIME
 종료 시각: $IMPORT_END_TIME
 소요 시간: ${IMPORT_DURATION}초
@@ -588,7 +745,7 @@ EOF
 
 ---
 
-### Step 1.2.3: 데이터 검증
+### Step 1.3.3: 데이터 검증
 
 **테이블 목록 비교**:
 ```bash
@@ -669,7 +826,188 @@ diff /tmp/host-auto-inc.txt /tmp/rds-auto-inc.txt
 
 ---
 
-## 1.3 WAS 2대 구성
+### Step 1.3.4: MySQL Replication 설정 (RDS를 Replica로)
+
+> **목표**: Host MySQL → RDS 실시간 동기화 구성
+
+#### 1.3.4.1: Host MySQL에서 Replication 사용자 생성
+
+```bash
+# Host MySQL에 Replication 전용 사용자 생성
+mysql -h localhost -u root -p << 'EOF'
+-- Replication 사용자 생성
+CREATE USER IF NOT EXISTS 'repl_user'@'%' IDENTIFIED BY 'StrongReplicationPassword123!';
+GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'repl_user'@'%';
+FLUSH PRIVILEGES;
+
+-- 확인
+SHOW GRANTS FOR 'repl_user'@'%';
+EOF
+```
+
+**기록**:
+- [ ] repl_user 생성 완료: Y/N
+
+---
+
+#### 1.3.4.2: RDS에서 GTID Auto-Position Replication 시작
+
+```bash
+# source GTID 정보 로드
+source /tmp/source-gtid.txt
+
+# SOURCE_GTID_EXECUTED 예시: uuid:1-245678
+# 단순 케이스(연속 구간 1개) 기준으로 start/end 추출
+GTID_RANGE=$(echo "$SOURCE_GTID_EXECUTED" | awk -F':' '{print $2}' | awk -F',' '{print $1}')
+GTID_START=$(echo "$GTID_RANGE" | awk -F'-' '{print $1}')
+GTID_END=$(echo "$GTID_RANGE" | awk -F'-' '{print $2}')
+if [ -z "$GTID_END" ]; then GTID_END="$GTID_START"; fi
+
+# 참고: GTID range가 여러 개인 경우(예: uuid:1-100,150-220)는
+# 구간별로 rds_set_external_source_gtid_purged를 반복 호출한다.
+
+echo "SOURCE_UUID=$SOURCE_UUID"
+echo "GTID_START=$GTID_START"
+echo "GTID_END=$GTID_END"
+
+# RDS에서 GTID purged 설정 + auto-position 복제 시작
+mysql -h $RDS_ENDPOINT -u billage_admin -p << EOF
+
+SET autocommit = 1;
+
+-- MySQL 8.0.37+ 에서 GTID baseline 설정
+CALL mysql.rds_set_external_source_gtid_purged(
+  '${SOURCE_UUID}',
+  ${GTID_START},
+  ${GTID_END}
+);
+
+-- 외부 Source를 GTID auto-position으로 연결
+CALL mysql.rds_set_external_master_with_auto_position(
+  '3.34.162.89',                    -- Host MySQL IP (Public 또는 Private)
+  3306,                              -- Port
+  'repl_user',                       -- Replication 사용자
+  'StrongReplicationPassword123!',   -- 비밀번호
+  0                                  -- SSL 사용 여부 (0=No, 1=Yes)
+);
+
+-- Replication 시작
+CALL mysql.rds_start_replication;
+
+EOF
+```
+
+> **중요**:
+> - RDS MySQL 8.0에서는 `mysql.rds_set_external_master_with_auto_position` 사용.
+> - RDS MySQL 8.4에서는 용어 변경에 따라 `mysql.rds_set_external_source_with_auto_position` 사용.
+> - 일반 `CHANGE MASTER TO`/`CHANGE REPLICATION SOURCE TO` 직접 실행 대신 RDS Stored Procedure를 사용.
+
+**기록**:
+- [ ] SOURCE_UUID: ___________
+- [ ] SOURCE_GTID_EXECUTED: ___________
+- [ ] GTID_START: ___________
+- [ ] GTID_END: ___________
+- [ ] Replication 시작 시각: ___________
+
+---
+
+#### 1.3.4.3: Replication 상태 확인 및 Lag 모니터링
+
+**Replication 상태 확인**:
+```bash
+# RDS에서 Replica 상태 확인
+mysql -h $RDS_ENDPOINT -u billage_admin -p -e "
+SHOW REPLICA STATUS\G
+" | grep -E "Replica_IO_Running|Replica_SQL_Running|Seconds_Behind|Last_Error"
+```
+
+**예상 출력**:
+```
+Replica_IO_Running: Yes      ← 필수!
+Replica_SQL_Running: Yes     ← 필수!
+Seconds_Behind_Source: 0     ← 0이면 동기화 완료
+Last_Error:                  ← 비어있어야 함
+```
+
+**Lag 모니터링 스크립트**:
+```bash
+# 실시간 Lag 모니터링 (1초마다)
+cat > /tmp/monitor-lag.sh << 'MONITOR_EOF'
+#!/bin/bash
+RDS_ENDPOINT="${1:-billage-dev-mysql.cpigi2qskxj3.ap-northeast-2.rds.amazonaws.com}"
+RDS_USER="billage_admin"
+RDS_PASS="${2}"
+
+while true; do
+    LAG=$(mysql -h $RDS_ENDPOINT -u $RDS_USER -p$RDS_PASS -N -e \
+        "SHOW REPLICA STATUS\G" 2>/dev/null | grep "Seconds_Behind" | awk '{print $2}')
+
+    IO_RUNNING=$(mysql -h $RDS_ENDPOINT -u $RDS_USER -p$RDS_PASS -N -e \
+        "SHOW REPLICA STATUS\G" 2>/dev/null | grep "Replica_IO_Running" | awk '{print $2}')
+
+    SQL_RUNNING=$(mysql -h $RDS_ENDPOINT -u $RDS_USER -p$RDS_PASS -N -e \
+        "SHOW REPLICA STATUS\G" 2>/dev/null | grep "Replica_SQL_Running" | awk '{print $2}')
+
+    TIMESTAMP=$(date '+%H:%M:%S')
+
+    if [ "$LAG" = "0" ]; then
+        echo "[$TIMESTAMP] Lag: ${LAG}s ✅ (IO: $IO_RUNNING, SQL: $SQL_RUNNING)"
+    else
+        echo "[$TIMESTAMP] Lag: ${LAG}s ⏳ (IO: $IO_RUNNING, SQL: $SQL_RUNNING)"
+    fi
+
+    sleep 1
+done
+MONITOR_EOF
+
+chmod +x /tmp/monitor-lag.sh
+echo "모니터링 시작: /tmp/monitor-lag.sh RDS_ENDPOINT RDS_PASSWORD"
+```
+
+**실행**:
+```bash
+/tmp/monitor-lag.sh billage-dev-mysql.cpigi2qskxj3.ap-northeast-2.rds.amazonaws.com "RDS비밀번호"
+```
+
+**기록**:
+- [ ] Replica_IO_Running: Yes / No
+- [ ] Replica_SQL_Running: Yes / No
+- [ ] 초기 Lag: ___________초
+- [ ] Lag=0 도달 시각: ___________
+
+---
+
+#### 1.3.4.4: Replication 문제 해결
+
+**일반적인 문제와 해결책**:
+
+| 문제 | 원인 | 해결 |
+|------|------|------|
+| Replica_IO_Running: No | 네트워크 또는 인증 문제 | Host MySQL 방화벽, Security Group 확인 |
+| Replica_SQL_Running: No | SQL 충돌 (Duplicate key 등) | `CALL mysql.rds_skip_repl_error;` |
+| Lag 증가 | Write 부하 높음 | RDS 인스턴스 크기 업그레이드 |
+| 연결 끊김 | 네트워크 불안정 | `CALL mysql.rds_start_replication;` 재실행 |
+
+**에러 Skip (주의해서 사용)**:
+```bash
+# 단일 에러 스킵
+mysql -h $RDS_ENDPOINT -u billage_admin -p -e "CALL mysql.rds_skip_repl_error;"
+
+# Replication 재시작
+mysql -h $RDS_ENDPOINT -u billage_admin -p -e "CALL mysql.rds_start_replication;"
+```
+
+**Replication 중지 (전환 완료 후)**:
+```bash
+mysql -h $RDS_ENDPOINT -u billage_admin -p -e "
+CALL mysql.rds_stop_replication;
+CALL mysql.rds_reset_external_master;
+"
+```
+
+---
+
+## 1.4 WAS 2대 구성
 
 ### Step 1.3.1: WAS(:8080) 검증 - Host MySQL 연결
 
@@ -700,7 +1038,7 @@ curl -s http://localhost:8080/api/items | jq '.' | head -20
 ```bash
 # 리허설 EC2에서
 sudo mkdir -p /opt/billage-rds
-sudo chown ec2-user:ec2-user /opt/billage-rds
+sudo chown ubuntu:ubuntu /opt/billage-rds
 ```
 
 **Spring Boot JAR 복사 및 설정**:
@@ -756,7 +1094,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ec2-user
+User=ubuntu
 WorkingDirectory=/opt/billage-rds
 ExecStart=/usr/bin/java \
   -Xmx512m \
@@ -1171,29 +1509,29 @@ aws rds describe-db-instances \
 
 # 4. EC2에 SSH 접속
 echo "[ ] 4. 리허설 EC2 SSH 접속 가능"
-ssh -i {your-key} ec2-user@$ELASTIC_IP "echo SSH OK"
+ssh -i {your-key} ubuntu@$ELASTIC_IP "echo SSH OK"
 
 # 5. EC2 내부에서 각 서비스 확인
 echo "[ ] 5. WAS(:8080) 정상"
-ssh -i {your-key} ec2-user@$ELASTIC_IP "curl -s http://localhost:8080/actuator/health | jq '.status'"
+ssh -i {your-key} ubuntu@$ELASTIC_IP "curl -s http://localhost:8080/actuator/health | jq '.status'"
 
 echo "[ ] 6. WAS(:8081) 정상"
-ssh -i {your-key} ec2-user@$ELASTIC_IP "curl -s http://localhost:8081/actuator/health | jq '.status'"
+ssh -i {your-key} ubuntu@$ELASTIC_IP "curl -s http://localhost:8081/actuator/health | jq '.status'"
 
 echo "[ ] 7. Nginx 정상"
-ssh -i {your-key} ec2-user@$ELASTIC_IP "curl -s http://localhost/health"
+ssh -i {your-key} ubuntu@$ELASTIC_IP "curl -s http://localhost/health"
 
 echo "[ ] 8. Host MySQL 접근"
-ssh -i {your-key} ec2-user@$ELASTIC_IP "mysql -h localhost -u root -p{password} -e 'SELECT COUNT(*) FROM billage.users;'"
+ssh -i {your-key} ubuntu@$ELASTIC_IP "mysql -h localhost -u root -p{password} -e 'SELECT COUNT(*) FROM billage.users;'"
 
 echo "[ ] 9. RDS 접근"
-ssh -i {your-key} ec2-user@$ELASTIC_IP "mysql -h $RDS_ENDPOINT -u billage_admin -p -e 'SELECT COUNT(*) FROM billage.users;'"
+ssh -i {your-key} ubuntu@$ELASTIC_IP "mysql -h $RDS_ENDPOINT -u billage_admin -p -e 'SELECT COUNT(*) FROM billage.users;'"
 
 echo "[ ] 10. 데이터 검증 - Row Count"
-ssh -i {your-key} ec2-user@$ELASTIC_IP "bash /tmp/compare-rowcount.sh"
+ssh -i {your-key} ubuntu@$ELASTIC_IP "bash /tmp/compare-rowcount.sh"
 
 echo "[ ] 11. k6 설치"
-ssh -i {your-key} ec2-user@$ELASTIC_IP "k6 version"
+ssh -i {your-key} ubuntu@$ELASTIC_IP "k6 version"
 
 echo "[ ] 12. 모니터링 대시보드 접근"
 echo "Grafana: {your-grafana-url}"
@@ -1227,13 +1565,41 @@ echo "=== Pre-Check 완료 ==="
 
 ---
 
-# Part 2: 리허설 Round 1 — 전략 A (mysqldump + 짧은 쓰기 중단)
+# Part 2: 리허설 Round 1 — Replica 기반 무중단 전환
 
 ## 목표
-- mysqldump 기반 마이그레이션 절차 검증
-- 쓰기 중단 시간 측정 (목표: < 5분)
+- **MySQL Replication 기반** 마이그레이션 절차 검증
+- **쓰기 중단 시간 최소화** (목표: < 10초)
+- Replica Lag 모니터링 및 전환 시점 결정
 - 데이터 정합성 확인
 - 전환 직후 에러율 측정
+
+## 전환 시나리오
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                    Replica 기반 전환 타임라인                         │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│  T-30분   부하 테스트 시작, Replica Lag 모니터링                      │
+│     │                                                                 │
+│     ▼     Lag = 0 확인 (실시간 동기화 상태)                           │
+│  T-5분    전환 준비 완료 선언                                         │
+│     │                                                                 │
+│     ▼                                                                 │
+│  T-0      ┌─────────────────────────────────────────┐                │
+│           │ 1. WAS 8080 정지 (Write Freeze 시작)    │  ← 5초        │
+│           │ 2. Lag = 0 최종 확인                    │  ← 2초        │
+│           │ 3. Nginx → 8081 전환                   │  ← 1초        │
+│           │ 4. WAS 8081 트래픽 수신                 │  ← 즉시       │
+│           └─────────────────────────────────────────┘                │
+│  T+10초   서비스 정상화, 에러율 모니터링                              │
+│     │                                                                 │
+│     ▼                                                                 │
+│  T+5분    Replication 중지, Host MySQL 정리                          │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+```
 
 ## 실행 전 준비
 
@@ -1361,6 +1727,7 @@ mysqldump \
   -u root \
   -p{prod-password} \
   --single-transaction \
+  --set-gtid-purged=OFF \
   --routines \
   --triggers \
   --events \
@@ -1390,7 +1757,7 @@ echo "Dump 파일 크기: $DUMP_SIZE"
 **Step 1.2: Delta 지점 기록**
 
 ```bash
-# Dump가 완료된 후 이 시점의 binlog position 기록
+# Dump가 완료된 후 이 시점의 GTID 기준점 기록
 # 이 이후의 변경이 delta가 됨
 
 DELTA_START_TIME=$(date '+%Y-%m-%d %H:%M:%S')
@@ -1398,8 +1765,8 @@ DELTA_START_TIMESTAMP=$(date +%s%N | cut -b1-13)  # milliseconds
 
 echo "Delta 기준점: $DELTA_START_TIME"
 
-# Binlog position 기록 (필요시)
-mysql -h localhost -u root -p{password} -e "SHOW MASTER STATUS \G" > /tmp/round1-binlog-pos.txt
+# GTID 기준점 기록
+mysql -h localhost -u root -p{password} -e "SELECT @@GLOBAL.gtid_executed \G" > /tmp/round1-gtid.txt
 
 echo "Delta 기준점: $DELTA_START_TIME" >> /tmp/round1-timeline.txt
 ```
@@ -1409,125 +1776,154 @@ echo "Delta 기준점: $DELTA_START_TIME" >> /tmp/round1-timeline.txt
 
 ---
 
-## Phase 2: 쓰기 중단 + Delta 적용 (핵심)
+## Phase 2: Replica Lag 확인 + 최소 Write Freeze 전환 (핵심)
 
-**Step 2.1: 쓰기 중단 시작**
+> **핵심**: Replication이 실시간으로 동기화되므로, Lag=0 확인 후 **수 초 이내** Write Freeze로 전환
+
+**Step 2.1: Replica Lag 최종 확인**
 
 ```bash
-# T0: 쓰기 중단 시작
+# Replication 상태 확인
+echo "====== Replica 상태 확인 ======"
+
+LAG=$(mysql -h $RDS_ENDPOINT -u billage_admin -p$RDS_PASS -N -e \
+    "SHOW REPLICA STATUS\G" 2>/dev/null | grep "Seconds_Behind" | awk '{print $2}')
+
+IO_RUNNING=$(mysql -h $RDS_ENDPOINT -u billage_admin -p$RDS_PASS -N -e \
+    "SHOW REPLICA STATUS\G" 2>/dev/null | grep "Replica_IO_Running" | awk '{print $2}')
+
+SQL_RUNNING=$(mysql -h $RDS_ENDPOINT -u billage_admin -p$RDS_PASS -N -e \
+    "SHOW REPLICA STATUS\G" 2>/dev/null | grep "Replica_SQL_Running" | awk '{print $2}')
+
+echo "Replica_IO_Running: $IO_RUNNING"
+echo "Replica_SQL_Running: $SQL_RUNNING"
+echo "Seconds_Behind_Source: $LAG"
+
+# Lag=0 확인
+if [ "$LAG" = "0" ] && [ "$IO_RUNNING" = "Yes" ] && [ "$SQL_RUNNING" = "Yes" ]; then
+    echo "✅ Replica 동기화 완료! 전환 준비 완료"
+else
+    echo "⚠️ Replica Lag: ${LAG}초 - 대기 필요"
+    echo "Lag=0이 될 때까지 대기..."
+    while [ "$LAG" != "0" ]; do
+        sleep 2
+        LAG=$(mysql -h $RDS_ENDPOINT -u billage_admin -p$RDS_PASS -N -e \
+            "SHOW REPLICA STATUS\G" 2>/dev/null | grep "Seconds_Behind" | awk '{print $2}')
+        echo "현재 Lag: ${LAG}초"
+    done
+    echo "✅ Lag=0 도달!"
+fi
+```
+
+**기록**:
+- [ ] Replica_IO_Running: Yes / No
+- [ ] Replica_SQL_Running: Yes / No
+- [ ] Seconds_Behind_Source: _____ (0이어야 함)
+- [ ] 전환 준비 완료: Y/N
+
+---
+
+**Step 2.2: Write Freeze + 즉시 전환 (목표: 10초 이내)**
+
+```bash
+# ⏱️ 전환 시작 - 타이머 시작
 T0=$(date +%s)
 T0_TIME=$(date '+%Y-%m-%d %H:%M:%S')
 
 echo ""
-echo "====== T0: 쓰기 중단 시작 ======"
-echo "T0: $T0_TIME"
+echo "══════════════════════════════════════════════════"
+echo "   🚀 T0: 전환 시작 - $T0_TIME"
+echo "══════════════════════════════════════════════════"
 
-echo "=== Phase 2: 쓰기 중단 + Delta 적용 ===" >> /tmp/round1-timeline.txt
-echo "T0 (쓰기 중단 시작): $T0_TIME" >> /tmp/round1-timeline.txt
+echo "=== Phase 2: Write Freeze + 전환 ===" >> /tmp/round1-timeline.txt
+echo "T0 (전환 시작): $T0_TIME" >> /tmp/round1-timeline.txt
 
-# Nginx에서 POST/PUT/DELETE 요청 차단
-# 임시 설정 추가: return 503 for POST/PUT/DELETE
+# Step 1: WAS 8080 정지 (Write Freeze)
+echo "[T+0s] WAS 8080 정지 중..."
+sudo systemctl stop billage-backend
 
-cat > /etc/nginx/conf.d/billage-write-block.conf << 'EOF'
-server {
-    listen 80;
-    server_name _;
+# Step 2: 최종 Lag 확인 (마지막 binlog 적용 대기)
+echo "[T+2s] 최종 Lag 확인..."
+sleep 2
+FINAL_LAG=$(mysql -h $RDS_ENDPOINT -u billage_admin -p$RDS_PASS -N -e \
+    "SHOW REPLICA STATUS\G" 2>/dev/null | grep "Seconds_Behind" | awk '{print $2}')
 
-    location /api/ {
-        # POST, PUT, DELETE 요청 차단 (503 Service Unavailable)
-        if ($request_method ~ ^(POST|PUT|DELETE|PATCH)$) {
-            return 503;
-        }
-        # GET 요청만 통과
-        proxy_pass http://billage_backend;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_connect_timeout 10s;
-        proxy_send_timeout 30s;
-        proxy_read_timeout 30s;
-    }
+if [ "$FINAL_LAG" = "0" ]; then
+    echo "✅ 최종 Lag=0 확인"
+else
+    echo "⚠️ 최종 Lag: ${FINAL_LAG}초 - 잠시 대기"
+    sleep 3
+fi
 
-    location /health {
-        access_log off;
-        return 200 "OK";
-    }
-}
-EOF
+# Step 3: Nginx 트래픽 전환 (8080 → 8081)
+echo "[T+5s] Nginx 전환: 8080 → 8081"
+/home/ubuntu/switch-backend.sh rds   # 또는 아래 명령 직접 실행
 
-sudo nginx -t
-sudo systemctl reload nginx
+# 또는 수동 전환:
+# sudo sed -i 's/localhost:8080/localhost:8081/g' /etc/nginx/conf.d/billage-upstream.conf
+# sudo nginx -t && sudo systemctl reload nginx
 
+# Step 4: 전환 완료 시각 기록
 T1=$(date +%s)
 T1_TIME=$(date '+%Y-%m-%d %H:%M:%S')
-WRITE_BLOCK_TIME=$((T1 - T0))
+CUTOVER_DURATION=$((T1 - T0))
 
-echo "T1 (쓰기 차단 완료): $T1_TIME (소요: ${WRITE_BLOCK_TIME}초)"
-echo "T1 (쓰기 차단 완료): $T1_TIME" >> /tmp/round1-timeline.txt
+echo ""
+echo "══════════════════════════════════════════════════"
+echo "   ✅ T1: 전환 완료 - $T1_TIME"
+echo "   ⏱️  총 소요 시간: ${CUTOVER_DURATION}초"
+echo "══════════════════════════════════════════════════"
 
-# 쓰기 차단 테스트
-echo "쓰기 차단 테스트..."
-BLOCK_TEST=$(curl -s -w "%{http_code}" -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"test": "data"}' \
-  http://localhost/api/test)
+echo "T1 (전환 완료): $T1_TIME" >> /tmp/round1-timeline.txt
+echo "전환 소요 시간: ${CUTOVER_DURATION}초" >> /tmp/round1-timeline.txt
 
-if [ "$BLOCK_TEST" = "503" ]; then
-  echo "✓ 쓰기 차단 정상"
+# Step 5: 즉시 검증
+echo ""
+echo "=== 전환 후 즉시 검증 ==="
+
+# RDS WAS 응답 확인
+HEALTH_CHECK=$(curl -s -w "%{http_code}" http://localhost:8081/actuator/health)
+echo "WAS 8081 Health: $HEALTH_CHECK"
+
+# API 응답 확인
+API_CHECK=$(curl -s -w "%{http_code}" http://localhost/api/health 2>/dev/null || echo "N/A")
+echo "API 응답: $API_CHECK"
+
+if [[ "$HEALTH_CHECK" == *"200"* ]]; then
+    echo "✅ 전환 성공!"
 else
-  echo "✗ 쓰기 차단 실패! 응답: $BLOCK_TEST"
-  # 원인 파악 필요
+    echo "❌ 전환 실패 - 롤백 필요"
+    echo "롤백: /home/ubuntu/switch-backend.sh host"
 fi
-
-# 읽기 테스트
-READ_TEST=$(curl -s -w "%{http_code}" http://localhost/api/items)
-if [[ "$READ_TEST" == *"200"* ]]; then
-  echo "✓ 읽기 계속 정상"
-else
-  echo "✗ 읽기 실패! 응답: $READ_TEST"
-fi
-
-sleep 5
 ```
 
 **기록**:
-- [ ] T0 (쓰기 중단 시작): $T0_TIME
-- [ ] T1 (쓰기 차단 완료): $T1_TIME
-- [ ] 쓰기 차단 소요 시간: ${WRITE_BLOCK_TIME}초
-- [ ] 쓰기 차단 테스트: ✓/✗
-- [ ] 읽기 계속 테스트: ✓/✗
+- [ ] T0 (전환 시작): $T0_TIME
+- [ ] T1 (전환 완료): $T1_TIME
+- [ ] **총 Write Freeze 시간**: ${CUTOVER_DURATION}초 (목표: <10초)
+- [ ] WAS 8081 Health: ✓/✗
+- [ ] API 응답: ✓/✗
 
 ---
 
-**Step 2.2: Delta 데이터 추출 및 적용**
+**Step 2.3: Replication 정리**
 
 ```bash
-# Delta 추출: DELTA_START_TIME 이후의 모든 변경 추출
-# 방법 1: 시간 기반 (간단하지만 부정확할 수 있음)
+# 전환 완료 후 Replication 중지
+echo "Replication 정리 중..."
 
-DELTA_EXTRACT_START=$(date +%s)
-DELTA_EXTRACT_START_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+mysql -h $RDS_ENDPOINT -u billage_admin -p$RDS_PASS << 'EOF'
+-- Replication 중지
+CALL mysql.rds_stop_replication;
 
-echo ""
-echo "Delta 추출 시작: $DELTA_EXTRACT_START_TIME"
+-- 외부 Master 설정 제거
+CALL mysql.rds_reset_external_master;
 
-# 핵심 테이블의 변경사항만 추출
-# 본 절차에서는 사전에 전체 dump를 했으므로 delta는 최소화됨
+-- 확인
+SHOW REPLICA STATUS\G
+EOF
 
-# 방법: RDS에는 이미 full dump가 있으므로
-# 이 단계에서는 새로운 데이터가 없으면 스킵 가능
-
-# 하지만 실제로는 다음과 같이 진행:
-# 1. Binlog position 기반으로 추출 (가장 정확)
-# 2. 또는 다시 한 번 dump 후 diff
-
-# 간단한 방법: 이미 RDS에 full dump가 있으므로 생략
-# 실제 환경에서는 binlog를 이용한 delta 동기화 필요
-
-echo "Delta 추출: 생략 (사전 full dump 사용)"
-
-DELTA_EXTRACT_END=$(date +%s)
-DELTA_EXTRACT_DURATION=$((DELTA_EXTRACT_END - DELTA_EXTRACT_START))
+echo "✅ Replication 정리 완료 - RDS가 이제 Primary로 독립 운영"
 
 echo "Delta 추출 완료: 소요 시간 ${DELTA_EXTRACT_DURATION}초"
 echo "Delta 추출 완료: 소요 시간 ${DELTA_EXTRACT_DURATION}초" >> /tmp/round1-timeline.txt
@@ -2099,6 +2495,8 @@ sudo cp /etc/my.cnf /etc/my.cnf.backup.replication
 sudo tee -a /etc/my.cnf << 'EOF'
 
 [mysqld]
+gtid_mode=ON
+enforce_gtid_consistency=ON
 log-bin=mysql-bin
 server-id=1
 binlog-format=ROW
@@ -2109,7 +2507,7 @@ EOF
 sudo systemctl restart mysql
 
 # 확인
-mysql -u root -p{password} -e "SHOW VARIABLES LIKE 'server_id'; SHOW VARIABLES LIKE 'log_bin%';"
+mysql -u root -p{password} -e "SHOW VARIABLES LIKE 'gtid_mode'; SHOW VARIABLES LIKE 'enforce_gtid_consistency'; SHOW VARIABLES LIKE 'server_id'; SHOW VARIABLES LIKE 'log_bin%';"
 ```
 
 ### Step 5.1: Replication 사용자 생성
@@ -2121,9 +2519,9 @@ mysql -u root -p{password} -e \
    GRANT REPLICATION SLAVE ON *.* TO 'repl_user'@'{RDS_SUBNET_IP_RANGE}';
    FLUSH PRIVILEGES;"
 
-# Binlog position 기록
-mysql -u root -p{password} -e "SHOW MASTER STATUS \G" > /tmp/repl-master-status.txt
-cat /tmp/repl-master-status.txt
+# GTID 기준점 기록
+mysql -u root -p{password} -e "SELECT @@server_uuid, @@GLOBAL.gtid_executed \G" > /tmp/repl-gtid-status.txt
+cat /tmp/repl-gtid-status.txt
 ```
 
 ### Step 5.2: RDS에서 Replication 설정
@@ -2131,22 +2529,29 @@ cat /tmp/repl-master-status.txt
 ```bash
 # RDS에서 (리허설 EC2에서 원격 실행)
 
-# Host MySQL binlog 파일명과 position 확인
-BINLOG_FILE=$(grep "File" /tmp/repl-master-status.txt | awk '{print $2}')
-BINLOG_POS=$(grep "Position" /tmp/repl-master-status.txt | awk '{print $2}')
+# GTID 정보 확인
+SOURCE_UUID=$(grep "server_uuid" /tmp/repl-gtid-status.txt | awk '{print $2}')
+SOURCE_GTID_EXECUTED=$(grep "gtid_executed" /tmp/repl-gtid-status.txt | awk '{print $2}')
+GTID_RANGE=$(echo "$SOURCE_GTID_EXECUTED" | awk -F':' '{print $2}' | awk -F',' '{print $1}')
+GTID_START=$(echo "$GTID_RANGE" | awk -F'-' '{print $1}')
+GTID_END=$(echo "$GTID_RANGE" | awk -F'-' '{print $2}')
+if [ -z "$GTID_END" ]; then GTID_END="$GTID_START"; fi
 
-echo "Binlog File: $BINLOG_FILE"
-echo "Binlog Position: $BINLOG_POS"
-
-# RDS에서 external master 설정
+# RDS에서 GTID baseline + auto-position 설정
 mysql -h $RDS_ENDPOINT -u billage_admin -p -e \
-  "CALL mysql.rds_set_external_master(
+  "SET autocommit = 1;
+   CALL mysql.rds_set_external_source_gtid_purged(
+    '$SOURCE_UUID',
+    $GTID_START,
+    $GTID_END
+  );"
+
+mysql -h $RDS_ENDPOINT -u billage_admin -p -e \
+  "CALL mysql.rds_set_external_master_with_auto_position(
     '{HOST_MYSQL_IP}',
     3306,
     'repl_user',
     'repl_password',
-    '$BINLOG_FILE',
-    $BINLOG_POS,
     0
   );"
 
@@ -2156,7 +2561,7 @@ mysql -h $RDS_ENDPOINT -u billage_admin -p -e \
 
 # 상태 확인
 mysql -h $RDS_ENDPOINT -u billage_admin -p -e \
-  "SHOW SLAVE STATUS \G"
+  "SHOW REPLICA STATUS \G"
 ```
 
 ## Phase 1-4: Replication 기반 마이그레이션
@@ -2171,7 +2576,7 @@ for i in {1..60}; do
   CURRENT_TIME=$(date '+%Y-%m-%d %H:%M:%S')
 
   LAG=$(mysql -h $RDS_ENDPOINT -u billage_admin -p -N -e \
-    "SHOW SLAVE STATUS \G" | grep "Seconds_Behind_Master" | awk '{print $2}')
+    "SHOW REPLICA STATUS \G" | grep "Seconds_Behind_Source" | awk '{print $2}')
 
   echo "[$i초] $CURRENT_TIME - Replica Lag: ${LAG}초"
 
@@ -2209,7 +2614,7 @@ for i in {1..1200}; do
   CURRENT_SECONDS=$(date +%s)
 
   LAG=$(mysql -h $RDS_ENDPOINT -u billage_admin -p -N -e \
-    "SHOW SLAVE STATUS \G" | grep "Seconds_Behind_Master" | awk '{print $2}')
+    "SHOW REPLICA STATUS \G" | grep "Seconds_Behind_Source" | awk '{print $2}')
 
   if [ $((i % 60)) -eq 0 ]; then
     echo "$CURRENT_TIME - Lag: ${LAG}초"

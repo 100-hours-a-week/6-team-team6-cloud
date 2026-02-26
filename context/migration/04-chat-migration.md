@@ -10,7 +10,7 @@ WebSocket 기반 채팅 서버의 멀티 인스턴스 마이그레이션은 분�
 
 둘째, 연결의 생명주기(lifecycle) 문제다. 스케일 인(인스턴스 축소) 또는 배포(Instance Refresh) 상황에서 기존 연결은 어떻게 되는가? 클라이언트는 자동으로 재연결해야 하는데, 이 과정에서 메시지 손실, 중복, 순서 역전 같은 일관성 문제가 발생할 수 있다. 대규모 클라이언트의 동시 재연결은 thundering herd 현상을 유발해 시스템을 마비시킬 수 있다.
 
-셋째, 메시지 전달 보증(delivery guarantee) 문제다. Redis Pub/Sub는 기본적으로 at-most-once 의미론(메시지 손실 가능)을 제공한다. 클라이언트 연결이 끊어진 시간에 발행된 메시지는 영구히 유실된다. 이를 보완하려면 모든 메시지를 데이터베이스에 영속화하고, 재연결 시 미수신 메시지를 회수(recovery)하는 복잡한 메커니즘을 구축해야 한다.
+셋째, 메시지 전달 보증(delivery guarantee) 문제다. 과거 Redis Pub/Sub는 기본적으로 at-most-once 의미론(메시지 손실 가능)을 제공했으나, RabbitMQ는 at-least-once를 제공하여 이를 해결한다. 클라이언트 연결이 끊어진 시간에 발행된 메시지도 큐에서 유지되었다가 재연결 시 복구 가능하다. 추가로 모든 메시지를 데이터베이스에 영속화하여 이중 안전성을 확보한다.
 
 이 마이그레이션의 성공 여부는 이 세 가지 문제를 얼마나 우아하게 해결하는지에 달려 있다.
 
@@ -54,7 +54,7 @@ Billage의 채팅 서버는 AWS Auto Scaling Group(ASG) 내 여러 인스턴스(
 
 이는 직관에 반하는 결정처럼 보이지만, 실제로는 더 견고한 아키텍처를 만든다. Sticky Session은 클라이언트의 모든 요청을 한 인스턴스로 고정하는데, 이는 단기적 편의를 제공하지만 장기적으로는 재앙이다. 만약 고정된 인스턴스가 장애 또는 배포로 제거되면, 클라이언트는 새 인스턴스로 강제 재연결되므로 Sticky Session의 이점이 사라진다. 결국 모든 클라이언트가 재연결 처리를 구현해야 하므로, Sticky Session은 "99%의 시간 동안 복잡성만 추가하는" 설계가 된다.
 
-대신 우리는 완전히 상태비저장(stateless) 기반으로 설계한다. Redis Pub/Sub이 인스턴스 간 메시지 전달의 중추 역할을 하고, 각 인스턴스는 자신에게 연결된 클라이언트만 책임진다.
+대신 우리는 완전히 상태비저장(stateless) 기반으로 설계한다. RabbitMQ (STOMP Relay)가 인스턴스 간 메시지 전달의 중추 역할을 하고, 각 인스턴스는 자신에게 연결된 클라이언트만 책임진다.
 
 ### 3.2 ALB의 WebSocket 지원
 
@@ -65,20 +65,20 @@ ALB의 연결 관리 파라미터:
 - **Connection Idle Timeout**: 기본값 60초. 양방향 트래픽이 없는 연결은 60초 후 ALB가 종료한다. 이는 장시간 조용한 WebSocket 연결을 강제로 끊는다. 따라서 heartbeat/ping-pong 메커니즘이 필수다.
 - **Deregistration Delay(Connection Draining)**: 기본값 300초. 인스턴스가 "draining" 상태에 진입하면(배포 또는 scale-in 시작), ALB는 기존 연결을 유지하지만 새 연결은 다른 인스턴스로 라우팅한다. 300초 후 ALB는 강제로 모든 draining 연스턴스의 연결을 종료한다.
 
-### 3.3 Redis Pub/Sub 역할
+### 3.3 RabbitMQ 역할
 
-Redis Pub/Sub은 인스턴스 간 메시지 브로드캐스트의 메인 메커니즘이다. 사용자 A(인스턴스 1)가 메시지를 보내면, 인스턴스 1은 이를 MySQL에 저장한 후 Redis Pub/Sub의 chat:room:{roomId} 채널에 발행한다. 그러면 인스턴스 2, 3, 4 등 이 채널을 구독 중인 모든 인스턴스가 메시지를 수신하고, 자신의 메모리에서 구독 중인 클라이언트들에게 WebSocket을 통해 전달한다.
+RabbitMQ는 인스턴스 간 메시지 브로드캐스트의 메인 메커니즘이다. 사용자 A(인스턴스 1)가 메시지를 보내면, 인스턴스 1은 이를 MySQL에 저장한 후 RabbitMQ의 topic exchange에 routing key `chat.room.{roomId}`로 발행한다. 그러면 인스턴스 2, 3, 4 등 이 exchange에 바인딩된 큐를 구독 중인 모든 인스턴스가 메시지를 수신하고, 자신의 메모리에서 구독 중인 클라이언트들에게 WebSocket을 통해 전달한다.
 
-Redis Pub/Sub은 **at-most-once 의미론**만 보장한다는 점이 핵심이다. 발행된 메시지는 현재 구독자들에게만 전달되고, 구독자가 부재 중이면 메시지는 영구히 유실된다. 이 때문에 모든 메시지를 데이터베이스에 영속화하는 이중 저장(dual write) 패턴이 필요하다.
+RabbitMQ는 **At Least Once 의미론**을 보장한다는 점이 핵심이다. 발행된 메시지는 최소 1회 이상 전달되며, 구독자가 부재 중이어도 큐에서 메시지를 유지한다. 이로 인해 메시지 손실이 거의 발생하지 않으며, 데이터베이스와의 이중 저장(dual write) 패턴으로 완전한 영속성을 확보한다.
 
 ### 3.4 메시지 영속성
 
 모든 채팅 메시지는 다음 두 곳에 저장된다:
 
-1. **Redis Pub/Sub**: 실시간 전달용. 현재 온라인 클라이언트들에게 즉시 도달시킨다.
+1. **RabbitMQ (STOMP Relay)**: 실시간 전달용. 현재 온라인 클라이언트들에게 즉시 도달시킨다. RabbitMQ는 at-least-once 의미론을 보장하므로 메시지 손실이 거의 없다.
 2. **MySQL (RDS)**: 영속화 용. 모든 메시지의 완전한 히스토리를 보존한다.
 
-이렇게 이원화하는 이유는, Redis Pub/Sub만으로는 메시지 손실을 방지할 수 없기 때문이다. 클라이언트가 연결 끊김 상태에서 발행된 메시지를 나중에 조회할 수 있어야 한다.
+이렇게 이원화하는 이유는, RabbitMQ의 큐 기반 전달만으로도 메시지 손실을 방지할 수 있지만, 클라이언트가 연결 끊김 상태에서 발행된 메시지를 나중에 조회할 수 있어야 하기 때문이다.
 
 ---
 
@@ -98,7 +98,7 @@ ALB의 대상 그룹은 ASG의 6개 인스턴스를 등록하고 있다. ALB는 
 ALB는 WebSocket upgrade 요청의 Connection: Upgrade, Upgrade: websocket 헤더를 검사하고, 이 요청을 인스턴스 3의 Spring Boot로 통과시킨다. 핸드셰이크 성공 후, ALB는 투명한 TCP 프록시 역할을 한다. 이후 모든 프레임은 ALB의 개입 없이 클라이언트와 인스턴스 3 사이를 직통으로 오간다.
 
 **Step 4: Spring의 연결 등록**
-인스턴스 3의 Spring WebSocket 핸들러는 afterConnectionEstablished() 콜백에서 이 세션을 메모리에 등록한다. 사용자 ID, 채팅방 ID, 세션 토큰 등이 저장된다. 동시에 인스턴스 3은 Redis의 chat:room:123 채널을 구독한다(이미 구독 중이 아니라면).
+인스턴스 3의 Spring WebSocket 핸들러는 afterConnectionEstablished() 콜백에서 이 세션을 메모리에 등록한다. 사용자 ID, 채팅방 ID, 세션 토큰 등이 저장된다. 동시에 인스턴스 3은 RabbitMQ의 topic exchange에서 routing key `chat.room.123`으로 바인딩된 큐를 구독한다(이미 구독 중이 아니라면).
 
 **Step 5: 메시지 수신 준비**
 클라이언트는 이제 인스턴스 3을 통해 실시간으로 메시지를 수신할 수 있다.
@@ -107,7 +107,7 @@ ALB는 WebSocket upgrade 요청의 Connection: Upgrade, Upgrade: websocket 헤�
 ALB의 idle timeout이 60초이므로, 양방향 통신이 없으면 60초 후 연결이 끊긴다. 따라서 30초마다 ping-pong 프레임을 교환하는 heartbeat 메커니즘이 필수다(이는 4.3절에서 다룬다).
 
 **Step 7: 연결 종료 또는 재연결**
-클라이언트가 명시적으로 연결을 닫으면, 또는 네트워크 장애로 끊기면, Spring의 afterConnectionClosed() 콜백이 발동한다. 이 시점에 세션을 메모리에서 제거하고, 필요하면 구독 중인 Redis 채널을 unsubscribe한다. 클라이언트는 exponential backoff with jitter를 적용하여 자동으로 재연결을 시도한다.
+클라이언트가 명시적으로 연결을 닫으면, 또는 네트워크 장애로 끊기면, Spring의 afterConnectionClosed() 콜백이 발동한다. 이 시점에 세션을 메모리에서 제거하고, 필요하면 구독 중인 RabbitMQ 큐를 해제한다. 클라이언트는 exponential backoff with jitter를 적용하여 자동으로 재연결을 시도한다.
 
 ### 4.2 메시지 흐름: 크로스 인스턴스 전달
 
@@ -121,23 +121,23 @@ ALB의 idle timeout이 60초이므로, 양방향 통신이 없으면 60초 후 �
 
 3. 인스턴스 1은 메시지를 MySQL의 chat_messages 테이블에 저장한다(필드: messageId, roomId, senderId, content, timestamp, status 등). 이 쓰기가 동기식으로 완료되어야 한다. MySQL이 느리면 메시지 지연이 크다.
 
-4. MySQL 저장 후, 인스턴스 1은 Redis Pub/Sub의 chat:room:456 채널에 메시지를 발행한다. 발행 내용은 JSON: { "messageId": "msg-12345", "senderId": "user-A", "content": "Hello", "timestamp": 1707030000, "type": "message" }
+4. MySQL 저장 후, 인스턴스 1은 RabbitMQ의 topic exchange `chat-exchange`에 routing key `chat.room.456`으로 메시지를 발행한다. 발행 내용은 JSON: { "messageId": "msg-12345", "senderId": "user-A", "content": "Hello", "timestamp": 1707030000, "type": "message" }
 
-5. Redis는 현재 이 채널을 구독 중인 모든 구독자(인스턴스 1, 2, 3 등)에게 메시지를 브로드캐스트한다. 이는 동기식 처리다.
+5. RabbitMQ는 현재 이 routing key에 바인딩된 모든 큐(각 인스턴스별 큐: 인스턴스 1, 2, 3 등)에 메시지를 라우팅한다. 이는 동기식 처리다.
 
 6. 인스턴스 1은 메시지를 자신의 메모리에 있는 채팅방 456의 구독자들(사용자 A 포함)에게 WebSocket으로 전달한다.
 
-7. 인스턴스 2는 Redis에서 메시지를 수신하고, 자신의 메모리에서 채팅방 456의 구독자들(사용자 B)을 찾아 WebSocket으로 전달한다.
+7. 인스턴스 2는 RabbitMQ에서 메시지를 수신하고, 자신의 메모리에서 채팅방 456의 구독자들(사용자 B)을 찾아 WebSocket으로 전달한다.
 
-8. 인스턴스 3, 4 등은 채팅방 456을 구독하지 않으므로 무시한다(구독하지 않으면 Redis 채널 자체가 비활성화됨).
+8. 인스턴스 3, 4 등은 채팅방 456을 구독하지 않으므로 무시한다(구독하지 않으면 RabbitMQ 큐 바인딩 자체가 해제됨).
 
 **이 흐름의 지연 시간:**
-MySQL 쓰기(평균 5ms) + Redis 발행/수신(평균 2ms) + 각 인스턴스 내 메모리 순회(1ms) = 총 8ms 정도. 단일 인스턴스 모델(3ms)보다는 느리지만 충분히 빠르다.
+MySQL 쓰기(평균 5ms) + RabbitMQ 발행/수신(평균 2ms) + 각 인스턴스 내 메모리 순회(1ms) = 총 8ms 정도. 단일 인스턴스 모델(3ms)보다는 느리지만 충분히 빠르다.
 
 **메시지 순서 보장:**
 단일 인스턴스 내에서는 순서가 보장된다(FIFO). 하지만 크로스 인스턴스 상황에서는 주의가 필요하다. 예를 들어 사용자 A, B, C가 각각 다른 인스턴스에 연결되어 있고, A->B->C 순서로 메시지를 보냈다면, 네트워크 지연으로 인해 B의 메시지가 먼저 도착할 수 있다. 이를 방지하려면:
 - 각 메시지에 글로벌 타임스탐프(timestamp)를 매긴다.
-- Redis에 발행할 때 sequence number를 부여한다.
+- RabbitMQ에 발행할 때 sequence number를 부여한다.
 - 클라이언트는 timestamp로 정렬하여 표시한다.
 
 ### 4.3 ALB의 WebSocket 지원 상세
@@ -172,30 +172,38 @@ ping-pong 프레임은 WebSocket 프로토콜의 control frame이므로, 페이�
 
 ---
 
-## 5. Redis Pub/Sub 채널 설계 (300K MAU 기준)
+## 5. RabbitMQ Topic Exchange 설계 (300K MAU 기준)
 
-### 5.1 채널 네이밍 및 구조
+### 5.1 Topic Exchange 및 Routing Key 구조
 
-300K MAU 환경에서 동시 활성 채팅방은 최대 250-300개로 예상된다. 모든 채팅방마다 하나의 Redis Pub/Sub 채널을 할당한다.
+300K MAU 환경에서 동시 활성 채팅방은 최대 250-300개로 예상된다. RabbitMQ의 topic exchange를 사용하여 routing key 기반으로 메시지를 라우팅한다.
 
-**채널명 패턴: chat:room:{roomId}**
+**Topic Exchange명: chat-exchange**
 
-예: chat:room:001, chat:room:002, ..., chat:room:300
+**Routing Key 패턴: chat.room.{roomId}**
+
+예: chat.room.001, chat.room.002, ..., chat.room.300
 
 이 패턴의 장점은:
-- 채팅방별 구독을 명확히 분리한다.
-- 나중에 Redis Cluster 확장 시 room ID를 기준으로 sharding할 수 있다.
-- 프롬프트나 모니터링 도구에서 채널을 쉽게 식별할 수 있다.
-- 300개 채널은 Redis 메모리 관점에서 무시할 수 있는 수준이다.
+- 채팅방별 메시지를 명확히 구분한다.
+- Topic exchange의 패턴 매칭으로 유연한 구독 가능 (예: chat.room.* for all rooms)
+- 메시지 큐에 대기시키므로 구독자 부재 시에도 메시지 손실 없음
+- RabbitMQ 클러스터 확장 시 용이
 
-**구독 방식:**
-사용자가 채팅방에 입장하면, 그 사용자가 연결된 인스턴스는 해당 채널을 구독한다. 만약 같은 인스턴스에 이미 다른 사용자가 그 채팅방에 있다면, 이미 구독 중이므로 추가 구독은 필요 없다.
+**큐 설정:**
+각 인스턴스마다 큐(queue)를 생성하고, chat-exchange와 바인딩한다.
+- 큐명: chat-queue-instance-{instance-id}
+- Durable: true (서버 재시작 시 메시지 유지)
+- Auto-delete: false (구독자 없어도 큐 유지)
+- TTL: 24시간 (오래된 메시지 자동 삭제)
 
 ### 5.2 메시지 포맷 (JSON)
 
-Redis Pub/Sub 채널에 발행되는 메시지의 포맷은 JSON이어야 한다. 이는 다양한 클라이언트(웹, 모바일, 데스크톱)에서 파싱하기 쉽기 때문이다.
+RabbitMQ topic exchange에 발행되는 메시지의 포맷은 JSON이어야 한다. 이는 다양한 클라이언트(웹, 모바일, 데스크톱)에서 파싱하기 쉽기 때문이다.
 
 **메시지 스키마:**
+
+RabbitMQ (STOMP Relay) 을 통해 발행되는 메시지의 포맷은 JSON이어야 한다.
 
 ```
 {
@@ -222,19 +230,23 @@ Redis Pub/Sub 채널에 발행되는 메시지의 포맷은 JSON이어야 한다
 - **type**: 메시지 타입. "message" (일반 메시지), "system" (시스템 알림), "notification" (사용자 입장/퇴장) 등.
 - **metadata**: 선택적 필드. 발신자 정보, 수정 시간 등을 포함한다.
 
-### 5.3 Subscribe/Unsubscribe Lifecycle
+### 5.3 RabbitMQ Consumer Lifecycle
 
-**Subscribe:**
-사용자가 채팅방에 입장할 때, 인스턴스는 해당 채널을 구독한다. Redis 클라이언트 라이브러리(Jedis, Lettuce 등)에서 subscription을 시작하면, 해당 연결은 pub/sub 모드로 전환되고, 이후 일반 command를 보낼 수 없다. 따라서 pub/sub 연결은 일반 연결과 분리되어야 한다.
+**Consumer 등록:**
+애플리케이션이 시작되면, 각 인스턴스는 RabbitMQ 브로커에 consumer를 등록한다. Consumer는 chat-queue-instance-{instance-id} 큐에서 메시지를 지속적으로 폴링한다.
 
-**인스턴스 내 구독 상태 추적:**
-각 인스턴스는 메모리에 구독 중인 채팅방의 목록을 유지한다. 예: roomSubscriptions = {456: true, 789: true, ...}. 새로운 사용자가 방 456에 입장하면, 이미 456이 roomSubscriptions에 있으면 Redis 구독을 중복으로 하지 않는다. 마지막 사용자가 방을 떠날 때만 구독을 해제한다.
+**메시지 수신:**
+Consumer가 메시지를 수신하면, 애플리케이션은 메시지를 처리하고 클라이언트에게 WebSocket으로 전달한다. RabbitMQ는 메시지가 처리될 때까지 큐에서 유지한다.
 
-**Unsubscribe:**
-사용자가 채팅방을 떠날 때, 그 인스턴스의 마지막 사용자인지 확인한다. 만약 그렇다면 Redis 채널을 unsubscribe한다. 만약 다른 사용자가 여전히 같은 방에 있다면, unsubscribe하지 않는다.
+**메시지 확인 (Acknowledgment):**
+- Auto-ACK: 메시지 수신 즉시 확인 (손실 위험, 권장하지 않음)
+- Manual-ACK: 메시지 처리 완료 후 명시적 확인 (권장, 메시지 손실 방지)
 
-**구독 상태 메모리 누수 방지:**
-인스턴스가 갑자기 종료되면 unsubscribe를 할 기회가 없다. 이는 문제가 되지 않는다. Redis Pub/Sub은 stateless이므로, 구독자가 사라져도 Redis 메모리에는 영향이 없다. 단지 그 채널의 메시지는 아무도 받지 않을 뿐이다(이는 정상 동작이다).
+**Consumer 제거:**
+인스턴스가 종료되면, consumer 등록을 해제한다. RabbitMQ는 자동으로 미처리 메시지를 다른 consumer에게 재전달한다 (재분배).
+
+**메모리 관리:**
+RabbitMQ가 메시지 큐를 관리하므로, 각 인스턴스의 메모리 누수 문제가 없다. 대신 RabbitMQ 브로커 자신의 메모리와 디스크를 모니터링해야 한다.
 
 ---
 
@@ -286,9 +298,9 @@ retry 패턴:
 ### 6.3 미수신 메시지 복구
 
 **문제 상황:**
-클라이언트가 인스턴스 A에 연결되어 있다. 이 상태에서 인스턴스 A가 배포(draining)되어 deregistration delay 동안 기존 메시지는 여전히 도착하지만, Redis Pub/Sub에 발행되지 않을 수 있다 (인스턴스 A가 drain 상태라는 것은 ALB에만 그렇다는 뜻이고, Redis는 여전히 구독 중이다). 실제로는 Redis는 계속 메시지를 발행한다.
+클라이언트가 인스턴스 A에 연결되어 있다. 이 상태에서 인스턴스 A가 배포(draining)되어 deregistration delay 동안 기존 메시지는 여전히 도착하지만, RabbitMQ에 발행되지 않을 수 있다 (인스턴스 A가 drain 상태라는 것은 ALB에만 그렇다는 뜻이고, RabbitMQ는 여전히 큐를 구독 중이다). 실제로는 RabbitMQ는 계속 메시지를 발행한다.
 
-더 명확한 문제: 클라이언트가 연결을 끊어져 있던 동안, Redis Pub/Sub에 발행된 메시지는 모두 유실된다. 클라이언트가 나중에 재연결하면, 끊어진 동안의 메시지는 받지 못한다.
+더 명확한 문제: 클라이언트가 연결을 끊어져 있던 동안, RabbitMQ에 발행된 메시지는 큐에 남아 있지만, 클라이언트는 구독하지 않으므로 받지 못한다. 클라이언트가 나중에 재연결하면, 끊어진 동안의 메시지는 별도로 조회해야 한다.
 
 **해결 방법: lastMessageId 기반 복구**
 
@@ -308,7 +320,7 @@ retry 패턴:
 **중요 메트릭:**
 - 전체 WebSocket 연결 수: sum(각 인스턴스의 연결 수)
 - 인스턴스별 연결 수: 불균형 감지
-- Redis 구독 채널 수: 활성 채팅방 수
+- RabbitMQ 큐 크기: 각 인스턴스별 처리 대기 메시지 수
 - 평균 메시지 레이턴시: 发행 ~ 수신 시간
 
 **모니터링 구현:**
@@ -323,7 +335,7 @@ retry 패턴:
 ASG의 desired capacity가 3에서 4로 증가하면, AWS는 새 인스턴스(예: instance-4)를 시작한다.
 
 1. EC2가 부팅되고 Spring Boot 애플리케이션이 시작된다.
-2. Spring이 Redis 연결 풀을 초기화한다. 이는 일반 연결 풀과 pub/sub 연결 풀을 모두 포함한다.
+2. Spring이 RabbitMQ 연결 풀을 초기화한다. 이는 메시지 발행/수신 연결을 포함한다.
 3. 애플리케이션이 ready 상태가 되면, Health Check Endpoint가 정상 응답을 시작한다.
 4. ALB는 Health Check가 성공하면, 이 인스턴스를 Target Group에 등록한다.
 5. 이 시점부터 ALB는 새 WebSocket 연결을 instance-4로 라우팅하기 시작한다.
@@ -332,13 +344,13 @@ ASG의 desired capacity가 3에서 4로 증가하면, AWS는 새 인스턴스(�
 
 기존 클라이언트(instance-1, 2, 3에 연결된)는 전혀 영향을 받지 않는다. ALB는 기존 연결을 그대로 유지한다.
 
-### 7.2 Redis 연결 준비 과정의 레이스 컨디션
+### 7.2 RabbitMQ 연결 준비 과정의 레이스 컨디션
 
 **주의할 점:**
-만약 Spring의 Redis 연결 초기화가 느리면, 일부 클라이언트는 이미 instance-4로 연결될 수 있다. 이 경우 WebSocket 메시지는 도착하지만, Redis 구독이 아직 준비되지 않았을 수 있다.
+만약 Spring의 RabbitMQ 연결 초기화가 느리면, 일부 클라이언트는 이미 instance-4로 연결될 수 있다. 이 경우 WebSocket 메시지는 도착하지만, RabbitMQ 구독이 아직 준비되지 않았을 수 있다.
 
 **해결책:**
-Spring의 readiness probe에서 Redis 연결을 명시적으로 확인한다. Redis 연결이 실패하면 readiness check를 fail로 반환한다. 그러면 ALB는 이 인스턴스를 unhealthy로 표시하고 트래픽을 보내지 않는다.
+Spring의 readiness probe에서 RabbitMQ 연결을 명시적으로 확인한다. RabbitMQ 연결이 실패하면 readiness check를 fail로 반환한다. 그러면 ALB는 이 인스턴스를 unhealthy로 표시하고 트래픽을 보내지 않는다.
 
 ```
 readiness check:
@@ -346,8 +358,8 @@ readiness check:
 2. Application responds 200 OK only if:
    - Spring is fully started
    - MySQL connection successful
-   - Redis connection pool ready
-   - Pub/Sub connection ready
+   - RabbitMQ connection pool ready
+   - Consumer subscriptions ready
 3. If any fails, respond 503 Service Unavailable
 ```
 
@@ -373,8 +385,8 @@ ASG는 ALB의 Target Group에 "deregister" 명령을 내린다. 정확히는 "co
 **Phase 3: 기존 연결 유지 (300초)**
 이 300초 동안, instance-1에 연결된 1000개 클라이언트는 계속 메시지를 주고받을 수 있다. instance-1은 정상적으로 작동한다.
 
-- Redis에 발행된 메시지는 계속 수신한다.
-- 새로운 메시지는 계속 MySQL과 Redis에 저장/발행한다.
+- RabbitMQ에 발행된 메시지는 계속 수신한다.
+- 새로운 메시지는 계속 MySQL과 RabbitMQ에 저장/발행한다.
 - Ping-pong도 정상 작동한다.
 
 **Phase 4: 강제 연결 종료 (300초 후)**
@@ -402,9 +414,9 @@ Timeline:
 
 **Case 1: instance-1 draining 동안 발행된 메시지**
 
-instance-1이 draining 상태에서도 Redis에 메시지를 발행할 수 있다. 이 메시지는:
+instance-1이 draining 상태에서도 RabbitMQ에 메시지를 발행할 수 있다. 이 메시지는:
 - MySQL에 저장된다. (영속화 OK)
-- Redis Pub/Sub에 발행된다. (구독자들이 수신)
+- RabbitMQ에 발행된다. (큐에서 모든 구독자들이 수신)
 - instance-1 자신의 클라이언트들은 직접 수신한다.
 
 **유실 없음.**
@@ -413,7 +425,7 @@ instance-1이 draining 상태에서도 Redis에 메시지를 발행할 수 있�
 
 클라이언트가 300초에 연결을 끊고, 재연결하는 데 5초가 소요되면, 그 5초 동안 발행된 메시지는:
 - MySQL에는 저장된다.
-- Redis Pub/Sub에는 발행되지만, 클라이언트는 구독하지 않으므로 받지 못한다.
+- RabbitMQ의 큐에는 저장되지만, 클라이언트가 구독 중이 아니므로 받지 못한다.
 
 **유실 가능성 있음.**
 
@@ -421,11 +433,11 @@ instance-1이 draining 상태에서도 Redis에 메시지를 발행할 수 있�
 
 **Case 3: 데이터베이스 저장 중 장애**
 
-만약 MySQL 쓰기가 실패했는데 Redis에는 발행되었다면?
+만약 MySQL 쓰기가 실패했는데 RabbitMQ에는 발행되었다면?
 
 이는 매우 드문 경우지만, 해결책:
 - MySQL 쓰기를 재시도한다.
-- 또는 Redis Pub/Sub에서 메시지를 수신하면, 비동기로 MySQL에 저장한다.
+- 또는 RabbitMQ에서 메시지를 수신하면, 비동기로 MySQL에 저장한다.
 - 결과적으로 최종적 일관성(eventual consistency)을 보장한다.
 
 ### 8.3 Thundering Herd 시뮬레이션
@@ -442,7 +454,7 @@ instance-1에 5000개 연결이 있다고 가정하자. 300초에 모두 끊기�
 이 과정에서:
 - ALB의 connection 새로 생성 부하
 - 신규 인스턴스의 Spring WebSocket handler 로드
-- Redis 구독 채널 재설정
+- RabbitMQ 큐 구독 재설정
 - MySQL 미수신 메시지 조회 (bulk select)
 
 **성능 영향:** 약 5~10초 동안 클라이언트 응답 속도가 느려질 수 있다. jitter 없이 모두 동시에 재연결하면 이 기간이 훨씬 길어진다.
@@ -473,27 +485,27 @@ CREATE TABLE chat_messages (
 
 모든 메시지는 동기식으로 MySQL에 저장된다. 저장이 실패하면 에러를 클라이언트에게 반환한다.
 
-**2. Redis Pub/Sub**
-메시지는 JSON으로 직렬화되어 chat:room:{roomId} 채널에 발행된다. 이는 현재 구독 중인 모든 인스턴스에게 전달된다.
+**2. RabbitMQ (STOMP Relay)**
+메시지는 JSON으로 직렬화되어 topic exchange `chat-exchange`의 routing key `chat.room.{roomId}`로 발행된다. RabbitMQ는 at-least-once 의미론을 제공하여 메시지 손실을 방지한다.
 
 ### 9.2 메시지 저장 순서 보장
 
-MySQL과 Redis에 동시에 저장할 때, 순서 불일치 가능성:
+MySQL과 RabbitMQ에 동시에 저장할 때, 순서 불일치 가능성:
 
 **정확한 흐름:**
 ```
 1. MySQL INSERT (동기, 블로킹)
 2. MySQL INSERT 성공 후, 트랜잭션 커밋
-3. Redis PUBLISH (동기, 매우 빠름)
-4. Redis PUBLISH 완료 후, 클라이언트에 ACK 반환
+3. RabbitMQ PUBLISH (동기, 매우 빠름)
+4. RabbitMQ PUBLISH 완료 후, 클라이언트에 ACK 반환
 ```
 
-이 순서를 보장함으로써, "MySQL에는 없지만 Redis에는 있는" 경우를 방지한다.
+이 순서를 보장함으로써, "MySQL에는 없지만 RabbitMQ에는 있는" 경우를 방지한다.
 
 ### 9.3 메시지 중복 방지
 
 **문제:**
-클라이언트가 재연결 후 미수신 메시지를 조회한다. 동시에 Redis에서도 같은 메시지가 도착할 수 있다. 클라이언트는 같은 메시지를 중복으로 표시할 수 있다.
+클라이언트가 재연결 후 미수신 메시지를 MySQL에서 조회한다. 동시에 RabbitMQ에서도 같은 메시지가 도착할 수 있다. 클라이언트는 같은 메시지를 중복으로 표시할 수 있다.
 
 **해결책: messageId 기반 Idempotency**
 
@@ -513,17 +525,17 @@ onMessage(msg):
 
 ## 10. 실행 계획
 
-### Phase 1: Redis Pub/Sub 코드 구현 (Backend) [1주]
+### Phase 1: RabbitMQ STOMP Relay 코드 구현 (Backend) [1주]
 
 **작업:**
-- Spring WebSocket 핸들러에 Redis 발행 로직 추가
-- Chat message service에 Redis publish 메서드 구현
-- Redis subscription 라이프사이클 관리 (방 입장/퇴장)
+- Spring WebSocket 핸들러에 RabbitMQ 발행 로직 추가
+- Chat message service에 RabbitMQ publish 메서드 구현
+- RabbitMQ consumer 라이프사이클 관리 (큐 바인딩/언바인딩)
 - 메시지 포맷(JSON) 정의 및 직렬화 로직
-- Error handling: Redis 장애 시 graceful degradation
+- Error handling: RabbitMQ 장애 시 graceful degradation
 
 **테스트:**
-- 단일 인스턴스에서 Redis 발행/수신 테스트
+- 단일 인스턴스에서 RabbitMQ 발행/수신 테스트
 - 메시지 포맷 검증
 
 ### Phase 2: 클라이언트 재연결 로직 (Frontend) [1주]
@@ -545,7 +557,7 @@ onMessage(msg):
 **설정:**
 - ECS 또는 EC2에 2개 Spring Boot 인스턴스 배포
 - ALB 구성 (sticky session OFF)
-- Redis 인스턴스 생성 (ElastiCache)
+- RabbitMQ 인스턴스 프로비저닝 (EC2 또는 Amazon MQ)
 
 **테스트 시나리오:**
 - 클라이언트 A를 인스턴스 1에 연결
@@ -574,7 +586,7 @@ onMessage(msg):
 **검증:**
 - 메시지 레이턴시 (p50, p95, p99)
 - MySQL 쓰기 성능
-- Redis Pub/Sub 처리량
+- RabbitMQ 메시지 처리 처리량
 - ALB 연결 수
 - 메모리 사용량 (메모리 누수 검사)
 
@@ -644,17 +656,17 @@ Test-6: 글로벌 메시지 순서
 
 ## 12. Fallback 및 롤백 전략
 
-### 12.1 Redis 장애 시나리오
+### 12.1 RabbitMQ 장애 시나리오
 
-만약 Redis Pub/Sub에 장애가 발생했다면(ElastiCache 다운, 네트워크 단절)?
+만약 RabbitMQ에 장애가 발생했다면(RabbitMQ 브로커 다운, 네트워크 단절)?
 
-**Partial Service 모드:**
-- 같은 인스턴스 내 클라이언트들(예: 같은 채팅방에 있는)은 계속 메시지를 주고받을 수 있다. Spring의 메모리 내 message broadcasting이 작동한다.
-- 다른 인스턴스 간 메시지는 전달되지 않는다.
-- 이는 사용자에게 명확히 알려야 한다: "일부 사용자에게는 메시지가 도착하지 않을 수 있습니다."
+**Graceful Degradation 모드:**
+- 같은 인스턴스 내 클라이언트들(예: 같은 채팅방에 있는)은 계속 메시지를 주고받을 수 있다. 애플리케이션의 메모리 내 메시지 큐가 작동한다.
+- 다른 인스턴스 간 메시지는 전달되지 않는다 (메시지는 애플리케이션 메모리에 일시 저장, 손실 가능).
+- 사용자에게 명확히 알려야 한다: "일부 채팅이 실시간으로 전달되지 않을 수 있습니다. 새로고침하면 다시 시작됩니다."
 
 **복구:**
-Redis가 복구되면, 자동으로 다시 구독이 시작되고 메시지 전달이 재개된다.
+RabbitMQ가 복구되면, 미처리 메시지는 큐에서 자동으로 consumer에게 재전달되고, 다시 정상 작동한다.
 
 ### 12.2 전체 채팅 장애 시나리오
 
@@ -701,24 +713,26 @@ Redis가 복구되면, 자동으로 다시 구독이 시작되고 메시지 전�
 3. **ALB 연결 큐**: ALB의 deregistration delay를 300초에서 600초로 증가시켜, 재연결이 더 분산되도록 한다.
 4. **사전 스케일 아웃**: 배포 전에 ASG의 desired capacity를 미리 증가시킨다 (1 → 2 → 3 → 2 → 1 방식의 canary).
 
-### 13.2 Redis 메모리 한계로 인한 Pub/Sub 채널 폭발 (300K MAU 기준)
+### 13.2 RabbitMQ 메모리 및 디스크 관리 (300K MAU 기준)
 
 **리스크:**
-300K MAU 환경에서 예상되는 동시 활성 채팅방은 최대 250-300개이다. 이 수준에서 Redis 메모리 관점의 부담은 매우 낮다. 각 채널은 구독자 메타데이터만 유지하므로 메모리 사용량은 무시할 수 있다.
+300K MAU 환경에서 동시 활성 채팅방은 최대 250-300개이다. 각 인스턴스마다 하나의 큐를 생성하므로, 최대 6개 백엔드 인스턴스 × 300개 채팅방 = 1,800개 큐 바인딩이 생긴다. RabbitMQ의 at-least-once 보증으로 인해 각 메시지는 큐에서 메모리/디스크에 저장되므로, 메모리 관리가 중요하다.
 
-예상 메모리 사용:
-- 채널당 약 100 bytes (메타데이터)
-- 300개 채널 × 100 bytes ≈ 30 KB (무시할 수 있는 수준)
+예상 메모리/디스크 사용:
+- 메시지당 약 1-2 KB (JSON 메타데이터 + 콘텐츠)
+- 초당 50-200 메시지 발생 (피크 시간대)
+- 24시간 보관 기준: 50 msg/sec × 86,400초 = 4.3M 메시지 / 일 ≈ 4-8 GB
 
 **완화 전략:**
-1. **채널 TTL 설정**: 구독자가 0명이 되면 자동으로 채널을 제거한다 (Redis 자동 동작).
-2. **메모리 모니터링**: CloudWatch에서 Redis 메모리 사용량을 추적하고, 80% 초과 시 알림.
-3. **채팅방 제한**: 동시 활성 채팅방 수를 제한하는 애플리케이션 로직 추가 (예: 최대 300개).
+1. **메시지 TTL 설정**: 메시지를 24시간 후 자동으로 제거 (RabbitMQ 정책).
+2. **큐 메모리 제한**: 큐당 최대 메모리 설정 (예: 100MB), 초과 시 오래된 메시지부터 삭제.
+3. **메모리 모니터링**: CloudWatch/RabbitMQ management console에서 메모리/디스크 사용량 추적, 80% 초과 시 알림.
+4. **디스크 용량 계획**: RabbitMQ 브로커는 최소 50GB 이상의 여유 디스크 필요.
 
 ### 13.3 메시지 순서 역전
 
 **리스크:**
-네트워크 지연, Redis Pub/Sub 지연, 클라이언트 간 시간 동기화 오류 등으로 인해 메시지 순서가 뒤바뀔 수 있다.
+네트워크 지연, RabbitMQ 처리 지연, 클라이언트 간 시간 동기화 오류 등으로 인해 메시지 순서가 뒤바뀔 수 있다.
 
 **예:**
 사용자 A가 "Hello"를 보냈고, 즉시 "World"를 보냈다. 하지만 클라이언트 B가 받은 순서는 "World" → "Hello"일 수 있다.
@@ -763,13 +777,13 @@ Chat Server의 멀티 인스턴스 마이그레이션은 단순한 "load balance
 
 **핵심 설계 원칙:**
 
-1. **상태를 외부화(externalize)한다**: Redis Pub/Sub과 RDS MySQL이 상태의 소유권을 갖는다. 각 인스턴스는 임시 상태(현재 연결)만 보유한다.
+1. **상태를 외부화(externalize)한다**: RabbitMQ (STOMP Relay)와 RDS MySQL이 상태의 소유권을 갖는다. 각 인스턴스는 임시 상태(현재 연결)만 보유한다.
 
 2. **재연결을 기본으로 설계한다**: 모든 클라이언트가 언제든 재연결될 수 있음을 가정한다. Sticky Session은 착각일 뿐이다.
 
-3. **메시지 영속성을 이중화한다**: Redis의 빠른 전달과 MySQL의 견고한 저장을 조합한다.
+3. **메시지 영속성을 이중화한다**: RabbitMQ의 큐 기반 전달과 MySQL의 견고한 저장을 조합한다.
 
-4. **장애를 예상하고 우아하게 처리한다**: Redis 다운 시 partial service, WebSocket 불가 시 HTTP polling fallback.
+4. **장애를 예상하고 우아하게 처리한다**: RabbitMQ 다운 시 partial service, WebSocket 불가 시 HTTP polling fallback.
 
 이 마이그레이션이 성공하면, Billage 채팅은 초당 수천 메시지, 수만 동시 사용자를 지탱할 수 있는 확장성 있는 서비스가 된다.
 

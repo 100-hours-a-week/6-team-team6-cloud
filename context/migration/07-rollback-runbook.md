@@ -228,33 +228,33 @@ curl -s http://ALB-DNS/api/health | jq .database_status
 
 ---
 
-### 3.2 Phase 2: Redis/ElastiCache 도입 (02-inmemory) 롤백
+### 3.2 Phase 2: RabbitMQ 도입 (02-inmemory) 롤백
 
-**목적:** ElastiCache Redis 생성, 채팅 서버의 Pub/Sub 기능을 Redis로 이전
+**목적:** RabbitMQ 생성, 채팅 서버의 메시지 브로커를 Redis Pub/Sub (아님) → RabbitMQ로 변경
 
 **상황:**
 - v1: 채팅은 메모리 내 메시지 큐 사용 (같은 인스턴스 내에서만 전달)
-- v2: Redis Pub/Sub으로 크로스 인스턴스 채팅 지원
-- 현재: Redis는 신규 도입, 없어도 채팅이 부분적으로 동작
+- v2: RabbitMQ로 크로스 인스턴스 채팅 지원 (At Least Once 보장)
+- 현재: RabbitMQ는 신규 도입, 없어도 채팅이 부분적으로 동작 (graceful degradation)
 
-**특징:** Redis는 캐시이므로 데이터 손실이 서비스 불가 (UX 저하)와 동일. 즉시 롤백할 필요 없고 graceful degradation 선택.
+**특징:** RabbitMQ는 메시지 브로커이므로, 장애 시 로컬 메모리 모드로 폴백 가능. 즉시 롤백할 필요 없고 graceful degradation 선택.
 
-#### 3.2.1 Redis 생성 실패 시 롤백
+#### 3.2.1 RabbitMQ 생성 실패 시 롤백
 
-**트리거:** ElastiCache 클러스터 생성 실패, 또는 생성 후 연결 불가
+**트리거:** RabbitMQ 클러스터 생성 실패, 또는 생성 후 연결 불가
 
 **절차:**
 1. Terraform 확인:
    ```
-   cd /mnt/terraform/phase-02 && terraform plan -destroy -target="aws_elasticache_cluster.billage_redis"
+   cd /mnt/terraform/phase-02 && terraform plan -destroy -target="aws_mq_broker.billage_rabbitmq"
    ```
-2. Redis 삭제 (캐시이므로 데이터 유실 OK):
+2. RabbitMQ 삭제 (메시지 브로커이므로 미처리 메시지는 손실, 이미 저장된 메시지는 DB에 있음):
    ```
-   terraform apply -target="aws_elasticache_cluster.billage_redis" -destroy
+   terraform apply -target="aws_mq_broker.billage_rabbitmq" -destroy
    ```
-3. v2 앱 환경 변수에서 Redis 연결 비활성화:
+3. v2 앱 환경 변수에서 RabbitMQ 연결 비활성화:
    ```
-   aws ssm put-parameter --name "/billage/prod/redis/enabled" --value "false" --overwrite
+   aws ssm put-parameter --name "/billage/prod/rabbitmq/enabled" --value "false" --overwrite
    ```
 4. v2 인스턴스 재시작:
    ```
@@ -264,55 +264,55 @@ curl -s http://ALB-DNS/api/health | jq .database_status
 **RTO:** 5분 (Terraform destroy + 앱 재시작)
 
 **확인 방법:**
-- 앱 로그에서 "Redis connection disabled" 메시지 확인
-- 채팅 기능은 같은 인스턴스 내에서만 동작 (partial service)
+- 앱 로그에서 "RabbitMQ connection disabled, using in-memory mode" 메시지 확인
+- 채팅 기능은 같은 인스턴스 내에서만 동작 (partial service, graceful degradation)
 
-#### 3.2.2 Redis 연결 장애 시 롤백 (서비스 지속)
+#### 3.2.2 RabbitMQ 연결 장애 시 롤백 (서비스 지속)
 
-**상황:** ElastiCache는 정상 생성, 하지만 앱에서 연결 불가 (보안그룹, 네트워크 문제)
+**상황:** RabbitMQ는 정상 생성, 하지만 앱에서 연결 불가 (보안그룹, 네트워크 문제)
 
-**트리거:** Prometheus `redis_connection_errors_total` > 100/5분
+**트리거:** Prometheus `rabbitmq_connection_errors_total` > 50/5분
 
 **절차:**
 1. **옵션 A: 네트워크 문제 해결 시도 (5분 내)**
-   - v2 ASG의 보안그룹에 ElastiCache 보안그룹 허용 규칙 추가
-   - v2 서브넷이 ElastiCache 서브넷과 같은 VPC에 있는지 확인
+   - v2 ASG의 보안그룹에 RabbitMQ 보안그룹 허용 규칙 추가
+   - v2 서브넷이 RabbitMQ 서브넷과 같은 VPC에 있는지 확인
    - VPC 라우팅 테이블 확인
 
-2. **옵션 B: 네트워크 복구 불가 → Redis 비활성화**
+2. **옵션 B: 네트워크 복구 불가 → RabbitMQ 비활성화**
    ```
-   aws ssm put-parameter --name "/billage/prod/redis/enabled" --value "false" --overwrite
+   aws ssm put-parameter --name "/billage/prod/rabbitmq/enabled" --value "false" --overwrite
    aws autoscaling start-instance-refresh --auto-scaling-group-name billage-backend-asg-v2
    ```
 
-**RTO:** 즉시 (앱이 Redis 연결 실패를 우아하게 처리하면)
+**RTO:** 즉시 (앱이 RabbitMQ 연결 실패를 우아하게 처리하면)
 
 **확인 방법:**
-- 채팅이 같은 인스턴스 내에서만 동작 (다른 인스턴스 사용자끼리는 채팅 불가)
-- 에러 로그에 "Redis unavailable, using in-memory fallback" 메시지
+- 채팅이 같은 인스턴스 내에서만 동작 (다른 인스턴스 사용자끼리는 실시간 채팅 불가, REST API polling으로 지연 전달)
+- 에러 로그에 "RabbitMQ unavailable, using in-memory queue fallback" 메시지
 
-#### 3.2.3 Redis 성능 저하 시 (부분 롤백 아님, 모니터링)
+#### 3.2.3 RabbitMQ 성능 저하 시 (부분 롤백 아님, 모니터링)
 
-**상황:** Redis 응답 시간 > 100ms (채팅 지연), 하지만 연결은 정상
+**상황:** RabbitMQ 메시지 처리 지연 > 5초 (채팅 지연), 하지만 연결은 정상
 
-**트리거:** Prometheus `redis_command_duration_seconds_p95` > 0.1
+**트리거:** Prometheus `rabbitmq_message_latency_seconds_p95` > 5
 
 **절차:**
-1. **5분 재시작:** ElastiCache 재부팅 (메모리 정제)
+1. **5분 재시작:** RabbitMQ 재부팅 (메모리 정제, 큐 플러시)
    ```
-   aws elasticache reboot-cache-cluster --cache-cluster-id billage-redis-001
+   aws mq reboot-broker --broker-id billage-rabbitmq
    ```
 2. **5분 후 미복구:** 메모리 부족 검토
-   - CloudWatch Metric: `ElastiCache/EngineCPUUtilization`, `SwapUsage`
-   - 필요 시 ElastiCache 인스턴스 타입 업그레이드 (cache.t4g.micro → cache.t4g.small)
+   - CloudWatch Metric: `AmazonMQ/BrokerCPUUtilization`, `BrokerStorageUtilization`
+   - 필요 시 RabbitMQ 인스턴스 타입 업그레이드 (mq.t3.micro → mq.t3.small)
+   - 큐 정리: 오래된 메시지 수동 삭제
 
 **RTO:** 5분 (재부팅), 업그레이드 시 10-20분
 
 **확인 방법:**
 ```
-aws elasticache describe-cache-clusters --cache-cluster-id billage-redis-001 \
-  --show-cache-node-info | jq '.CacheClusters[0].CacheNodes[0].CacheNodeStatus'
-# 응답: "available"
+aws mq describe-broker --broker-id billage-rabbitmq | jq '.BrokerState'
+# 응답: "RUNNING"
 ```
 
 ---
@@ -502,11 +502,11 @@ watch -n 5 'aws autoscaling describe-auto-scaling-groups \
 
 ### 3.4 Phase 4: 채팅 서버 마이그레이션 (04-chat-migration) 롤백
 
-**목적:** 채팅 기능을 v2로 마이그레이션, Redis Pub/Sub 사용
+**목적:** 채팅 기능을 v2로 마이그레이션, RabbitMQ 사용
 
 **상황:**
 - v1: 채팅은 메모리 기반, 같은 인스턴스 내에서만 메시지 전달
-- v2: WebSocket + Redis Pub/Sub, 크로스 인스턴스 채팅 지원
+- v2: WebSocket + RabbitMQ (STOMP Relay), 크로스 인스턴스 채팅 지원
 - 트래픽: v1 사용 중, v2는 테스트 단계
 
 **특징:** 채팅은 비즈니스 크리티컬이지만 수동으로 recovery 가능 (메시지 재입력). 우아한 성능 저하(graceful degradation)를 선호.
@@ -552,29 +552,29 @@ curl -i ws://ALB-DNS/chat/ws
 # 응답: 101 Switching Protocols
 ```
 
-#### 3.4.2 Redis Pub/Sub 장애 시 (Graceful Degradation)
+#### 3.4.2 RabbitMQ 장애 시 (Graceful Degradation)
 
-**상황:** Redis 연결은 정상, 하지만 Pub/Sub 메시지 전달 실패
+**상황:** RabbitMQ 연결은 정상, 하지만 메시지 전달 실패
 
-**트리거:** Prometheus `redis_pubsub_messages_lost_total` > 10/5분, 또는 `redis_pubsub_latency_seconds_p95` > 5초
+**트리거:** Prometheus `rabbitmq_connection_errors_total` > 10/5분, 또는 `rabbitmq_message_latency_seconds_p95` > 5초
 
 **절차:**
 
-**Step 1: Redis 상태 확인 (1분)**
+**Step 1: RabbitMQ 상태 확인 (1분)**
 ```
-aws elasticache describe-cache-clusters --cache-cluster-id billage-redis-001 \
-  | jq '.CacheClusters[0] | {Status: .CacheClusterStatus, EngineVersion: .EngineVersion, CacheNodeType: .CacheNodeType}'
+aws mq describe-broker --broker-id billage-rabbitmq \
+  | jq '.BrokerState'
 ```
 
-**Step 2: Pub/Sub 메시지 지연 시 ElastiCache 재부팅**
+**Step 2: 메시지 지연 시 RabbitMQ 재시작**
 ```
-aws elasticache reboot-cache-cluster --cache-cluster-id billage-redis-001
+aws mq reboot-broker --broker-id billage-rabbitmq
 ```
 (메모리 정제, 메시지 큐 플러시)
 
-**Step 3: 5분 후 미복구 시 Pub/Sub 비활성화**
+**Step 3: 5분 후 미복구 시 RabbitMQ 비활성화**
 ```
-aws ssm put-parameter --name "/billage/prod/chat/redis_pubsub_enabled" \
+aws ssm put-parameter --name "/billage/prod/rabbitmq/enabled" \
   --value "false" --overwrite
 aws autoscaling start-instance-refresh --auto-scaling-group-name billage-chat-asg-v2
 ```
@@ -584,7 +584,7 @@ aws autoscaling start-instance-refresh --auto-scaling-group-name billage-chat-as
 - 같은 인스턴스 사용자끼리만 실시간 채팅 가능
 - 다른 인스턴스 사용자끼리는 REST API polling으로 전달 (지연)
 
-**RTO:** 5분 (ElastiCache 재부팅) 또는 10분 (Pub/Sub 비활성화 + 앱 재시작)
+**RTO:** 5분 (RabbitMQ 재시작) 또는 10분 (RabbitMQ 비활성화 + 앱 재시작)
 
 **확인 방법:**
 - Prometheus `chat_degradation_mode` = 1 (활성화)
@@ -1197,9 +1197,9 @@ terraform apply -var="v1_weight=0" -var="v2_weight=100"
 | Phase | 리허설 항목 | 소요 시간 | 담당자 |
 |-------|----------|---------|-------|
 | 1 (DB) | Host MySQL ↔ RDS 전환, 데이터 동기화 검증 | 30분 | DevOps Lead |
-| 2 (Redis) | ElastiCache 생성/삭제, 앱 재시작 | 15분 | 백엔드 엔지니어 |
+| 2 (RabbitMQ) | RabbitMQ 생성/삭제, 앱 재시작 | 15분 | 백엔드 엔지니어 |
 | 3 (WAS) | ASG 생성/삭제, Instance Refresh 취소 | 20분 | DevOps Lead |
-| 4 (채팅) | WebSocket 재연결, Pub/Sub 폴링 전환 | 20분 | 채팅 서버 엔지니어 |
+| 4 (채팅) | WebSocket 재연결, RabbitMQ 폴링 전환 | 20분 | 채팅 서버 엔지니어 |
 | 5 (LB) | Route 53 weight 변경, DNS 캐시 갱신 확인 | 15분 | DevOps Lead |
 | 6 (모니터링) | Prometheus/Grafana/Loki 다운, 대체 수단 사용 | 15분 | 인프라 엔지니어 |
 
@@ -1403,10 +1403,10 @@ MTTR (Mean Time To Recovery): 15분
 
 ```
 /billage/prod/db/endpoint              → RDS or Host MySQL endpoint (phase 1)
-/billage/prod/redis/enabled            → true/false (phase 2)
-/billage/prod/redis/endpoint           → ElastiCache endpoint (phase 2)
+/billage/prod/rabbitmq/enabled        → true/false (phase 2)
+/billage/prod/rabbitmq/endpoint        → RabbitMQ endpoint (phase 2)
 /billage/prod/chat/use_websocket       → true/false (phase 4)
-/billage/prod/chat/redis_pubsub_enabled → true/false (phase 4)
+/billage/prod/chat/rabbitmq_enabled    → true/false (phase 4)
 /billage/prod/chat/enabled             → v1_only / v2 / disabled (phase 4)
 ```
 

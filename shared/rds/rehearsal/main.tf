@@ -1,5 +1,5 @@
-# shared/rds/dev/main.tf
-# Billage RDS MySQL (v2 Dev 환경 전용)
+# shared/rds/rehearsal/main.tf
+# Billage RDS MySQL (리허설 환경 - Host→RDS 마이그레이션 리허설용)
 
 terraform {
   required_version = ">= 1.0.0"
@@ -48,7 +48,7 @@ resource "aws_subnet" "private_a" {
   map_public_ip_on_launch = false
 
   tags = {
-    Name = "${var.project_name}-${var.env}-v2-rds-private-a"
+    Name = "${var.project_name}-${var.env}-rds-private-a"
     Type = "private"
   }
 }
@@ -60,7 +60,7 @@ resource "aws_subnet" "private_c" {
   map_public_ip_on_launch = false
 
   tags = {
-    Name = "${var.project_name}-${var.env}-v2-rds-private-c"
+    Name = "${var.project_name}-${var.env}-rds-private-c"
     Type = "private"
   }
 }
@@ -70,7 +70,7 @@ resource "aws_route_table" "private" {
   vpc_id = data.aws_vpc.main.id
 
   tags = {
-    Name = "${var.project_name}-${var.env}-v2-private-rt"
+    Name = "${var.project_name}-${var.env}-private-rt"
   }
 }
 
@@ -88,11 +88,11 @@ resource "aws_route_table_association" "private_c" {
 # Security Group
 #==============================================================================
 resource "aws_security_group" "rds" {
-  name        = "${var.project_name}-${var.env}-v2-rds-sg"
-  description = "Security group for v2 RDS MySQL"
+  name        = "${var.project_name}-${var.env}-rds-sg"
+  description = "Security group for RDS MySQL"
   vpc_id      = data.aws_vpc.main.id
 
-  # Backend에서 접근 허용 (VPC 전체 CIDR)
+  # Backend에서 접근 허용 (CIDR로 VPC 전체 허용, 또는 특정 SG)
   ingress {
     description = "MySQL from VPC"
     from_port   = 3306
@@ -109,7 +109,7 @@ resource "aws_security_group" "rds" {
   }
 
   tags = {
-    Name = "${var.project_name}-${var.env}-v2-rds-sg"
+    Name = "${var.project_name}-${var.env}-rds-sg"
   }
 }
 
@@ -117,12 +117,12 @@ resource "aws_security_group" "rds" {
 # DB Subnet Group
 #==============================================================================
 resource "aws_db_subnet_group" "main" {
-  name        = "${var.project_name}-${var.env}-v2-db-subnet-group"
-  description = "DB subnet group for v2 ${var.env}"
+  name        = "${var.project_name}-${var.env}-db-subnet-group"
+  description = "DB subnet group for ${var.env}"
   subnet_ids  = [aws_subnet.private_a.id, aws_subnet.private_c.id]
 
   tags = {
-    Name = "${var.project_name}-${var.env}-v2-db-subnet-group"
+    Name = "${var.project_name}-${var.env}-db-subnet-group"
   }
 }
 
@@ -130,7 +130,7 @@ resource "aws_db_subnet_group" "main" {
 # DB Parameter Group
 #==============================================================================
 resource "aws_db_parameter_group" "main" {
-  name   = "${var.project_name}-${var.env}-v2-mysql-params"
+  name   = "${var.project_name}-${var.env}-mysql-params"
   family = "mysql8.0"
 
   parameter {
@@ -163,8 +163,20 @@ resource "aws_db_parameter_group" "main" {
     value = "2"
   }
 
+  # GTID 기반 Replication 설정
+  parameter {
+    name         = "enforce_gtid_consistency"
+    value        = "ON"
+    apply_method = "pending-reboot"
+  }
+
+  parameter {
+    name  = "binlog_format"
+    value = "ROW"
+  }
+
   tags = {
-    Name = "${var.project_name}-${var.env}-v2-mysql-params"
+    Name = "${var.project_name}-${var.env}-mysql-params"
   }
 }
 
@@ -172,7 +184,7 @@ resource "aws_db_parameter_group" "main" {
 # RDS Instance
 #==============================================================================
 resource "aws_db_instance" "main" {
-  identifier = "${var.project_name}-${var.env}-v2-mysql"
+  identifier = "${var.project_name}-${var.env}-mysql"
 
   engine               = "mysql"
   engine_version       = "8.0"
@@ -201,6 +213,6 @@ resource "aws_db_instance" "main" {
   skip_final_snapshot = var.skip_final_snapshot
 
   tags = {
-    Name = "${var.project_name}-${var.env}-v2-mysql"
+    Name = "${var.project_name}-${var.env}-mysql"
   }
 }

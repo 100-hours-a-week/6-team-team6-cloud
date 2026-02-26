@@ -13,7 +13,8 @@
 **범위:**
 - 네트워킹: VPC 레이아웃, 서브넷, 보안 그룹 구성
 - 컴퓨팅: EC2 → ASG 전환, Launch Template 설계
-- 데이터: MySQL v1 → RDS 마이그레이션, Redis 도입
+- 데이터: MySQL v1 → RDS 마이그레이션 (JWT 기반 stateless 아키텍처)
+- 메시징: 로컬 메시지 브로커 → RabbitMQ 전환 (분산 채팅 지원)
 - CI/CD: GitHub Actions OIDC → ECR → ASG 파이프라인
 - 모니터링: CloudWatch 기반 알람 유지 및 강화
 - 리스크 관리: 롤백 전략, 검증 기준, 이중 실행(dual-run) 기간 관리
@@ -253,8 +254,8 @@ Dev VPC (10.0.0.0/16)
 │  └─ Security Group: RDS-SG
 ├─ Private Subnet 4 - DB (10.0.21.0/24, ap-northeast-2c)
 │  └─ RDS MySQL Standby (자동 페일오버)
-│  └─ ElastiCache Redis (cache.t4g.micro, 1 node)
-│  └─ Security Group: RDS-SG, Redis-SG
+│  └─ RabbitMQ (Amazon MQ 또는 EC2, STOMP over WebSocket)
+│  └─ Security Group: RDS-SG, RabbitMQ-SG
 └─ VPC Endpoint (S3, ECR, Secrets Manager, SSM)
 ```
 
@@ -262,7 +263,7 @@ Dev VPC (10.0.0.0/16)
 - **2 AZ 분산:** AZ 다운 시에도 서비스 계속 운영 (RTO < 1분)
 - **공개/사설 분리:** 인스턴스는 사설 서브넷에 → 더 강한 보안
 - **NAT Gateway:** 사설 인스턴스가 외부(ECR, S3)와 통신 가능
-- **DB/Cache 사설:** RDS, Redis는 공개 접근 차단 (인스턴스 → VPC Endpoint 경로)
+- **DB/MQ 사설:** RDS, RabbitMQ는 공개 접근 차단 (인스턴스만 접근 가능)
 - **VPC Endpoint:** NAT Gateway 경유하지 않고 AWS 내부 경로로 S3, ECR 접근 → 비용 절감
 
 ### 4.2 컴퓨팅 계층 (재설계)
@@ -338,7 +339,7 @@ Dev VPC (10.0.0.0/16)
 - **인스턴스 타입:** t4g.small (변경 가능성 → Flexible 설정)
 - **EBS:** 30GB gp3, DeleteOnTermination: true, 암호화 활성화
 - **IAM Role:** 각 서비스별 전용 역할
-  - Backend: S3(images), RDS, ElastiCache, CloudWatch, Secrets Manager 접근
+  - Backend: S3(images), RDS, RabbitMQ, CloudWatch, Secrets Manager 접근
   - Frontend: S3(images), CloudWatch 접근
   - AI: ECR, Secrets Manager, RDS 접근
 - **Security Group:** 각 서비스별 전용 (ALB → Backend:8080, Frontend:3000, AI:5000)
@@ -399,15 +400,25 @@ ECR Repositories:
   - Security Group (RDS-SG): Backend, Frontend, AI ASG의 사설 IP 범위만 허용
   - 비밀번호: Secrets Manager 관리 (자동 로테이션 가능)
 
-**ElastiCache Redis (300K MAU 성장 대응):**
-- **엔진:** Redis 6.x (또는 7.x)
-- **노드 타입:** cache.t4g.micro (1 노드, 단일 AZ)
-  - 향후 Multi-AZ Cluster로 확대 가능 (300K MAU → cache.t4g.small 권장)
-- **용도:** 채팅 Pub/Sub, 세션 캐시 (Spring Session Redis)
-- **메모리:** 0.5GB (현재), 향후 1GB+ (300K MAU 세션 저장소 = ~100K 동시 세션 × 1KB = 100MB 필요)
+**RabbitMQ (분산 메시지 브로커):**
+- **엔진:** RabbitMQ 3.12+ (또는 Amazon MQ 관리형)
+- **배포:** Amazon MQ 또는 EC2 단일 인스턴스 (초기 단순성 위해)
+- **용도:** 로컬 메시지 브로커 (Spring Simple Broker) → 외부 메시지 브로커 전환
+  - STOMP over WebSocket (실시간 채팅 메시지 브로드캐스트)
+  - 여러 서버가 동일한 메시지 채널 공유 (stateless 아키텍처)
+- **구성:**
+  - Virtual Host: `/billage`
+  - 큐/토픽: 채팅 룸별 주제 (topic-based exchange)
+  - Prefetch: 32 (메시지 처리량 조절)
 - **WebSocket 동시 연결:** 300-500개 at peak (300K MAU)
-- **접근 제어:** Security Group (Redis-SG), 비밀번호 인증
-- **백업:** 자동 스냅샷 (매일), RDB 지속화
+- **접근 제어:** Security Group (RabbitMQ-SG), 사용자 인증 (Secrets Manager)
+- **백업:** 설정 코드화 (Infrastructure as Code)
+
+**Redis (캐싱, 향후 검토):**
+- **현재:** 마이그레이션 범위에 포함되지 않음
+- **이유:** JWT 기반 stateless 인증 + RabbitMQ로 메시지 처리 → 외부 세션 저장소 불필요
+- **향후:** 300K MAU 이후 성능 최적화로 cache layer 추가 검토
+- **후보:** ElastiCache Redis (cache.t4g.micro, 세션/객체 캐싱)
 
 **S3 (기존 유지, 개선):**
 - 버킷: billage-images-dev, billage-images-prod
@@ -416,10 +427,12 @@ ECR Repositories:
 - VPC Endpoint: S3 Gateway Endpoint (NAT 비용 절감)
 - 암호화: AES-256 (기본)
 
-**세션 저장 (개선):**
-- Redis 기반 Spring Session (v2.0.0부터)
-  - 이점: 인스턴스 재시작 → 세션 유지 (사용자 로그아웃 불필요)
-  - 클러스터 확장성 높음 (모든 인스턴스가 같은 Redis 공유)
+**인증 방식 (개선):**
+- JWT (JSON Web Token) 기반 stateless 인증 (v2.0.0부터)
+  - 이점: 서버에서 세션 상태 유지 불필요 → 모든 인스턴스 동일하게 처리
+  - 클러스터 확장성 매우 높음 (세션 친화성 불필요, Sticky Session 미필요)
+  - 인스턴스 재시작 시에도 토큰 유효하면 재로그인 불필요
+  - 모든 요청에 JWT 헤더 포함 (Authorization: Bearer &lt;token&gt;)
 
 ### 4.4 배포 및 CI/CD 파이프라인
 
@@ -482,9 +495,9 @@ GitHub Actions
 Backend EC2 Role:
 ├─ ECR: 이미지 pull 권한
 ├─ S3: billage-images-* 버킷 write 권한
-├─ RDS: mysql:// 프록시 접근 (선택적)
-├─ ElastiCache: 접근 불필요 (Security Group 기반)
-├─ Secrets Manager: DB 비밀번호, JWT 키 read
+├─ RDS: 데이터베이스 접근 (Security Group 기반)
+├─ RabbitMQ: 접근 불필요 (Security Group + 비밀번호 기반)
+├─ Secrets Manager: DB 비밀번호, JWT 키, RabbitMQ 비밀번호 read
 ├─ CloudWatch: Logs, Metrics 업로드
 └─ SSM: Parameter 읽기 (선택적)
 
@@ -512,7 +525,7 @@ ALB Security Group:
 Backend Security Group:
 ├─ Inbound: ALB-SG 포트 8080
 ├─ Outbound: RDS-SG 포트 3306 (MySQL)
-├─ Outbound: Redis-SG 포트 6379 (캐시)
+├─ Outbound: RabbitMQ-SG 포트 5672 (AMQP 메시지 브로커)
 └─ Outbound: 0.0.0.0/0 포트 443 (외부 API, S3, ECR)
 
 Frontend Security Group:
@@ -526,8 +539,8 @@ AI Security Group:
 RDS Security Group:
 └─ Inbound: Backend-SG, Frontend-SG, AI-SG 포트 3306
 
-Redis Security Group:
-└─ Inbound: Backend-SG, Frontend-SG, AI-SG 포트 6379
+RabbitMQ Security Group:
+└─ Inbound: Backend-SG 포트 5672 (AMQP), 포트 15672 (관리 UI, 내부 전용)
 ```
 
 **TLS/SSL (미적용, 향후 개선):**
@@ -612,7 +625,7 @@ Redis Security Group:
 - 데이터 마이그레이션 기간 중 데이터 불일치 가능성
   - v1 MySQL ↔ v2 RDS 간 동기화 필요
   - 도중 사용자 예약/결제 생성 → v1, v2 중 어디에 저장?
-- 세션 문제: v1 MySQL 세션 ↔ v2 Redis 세션 호환 미흡
+- 세션 문제: v1 세션 관리 ↔ v2 JWT stateless 호환 확인 필요
 - 부분 배포 불가능 (Backend만 먼저 이동 불가)
 
 **결정:** ⚠️ 부분 적용 (API 검증, 데이터 마이그레이션 이후)
@@ -686,89 +699,107 @@ dev.billages.com
 
 ```
 Dependencies:
-├─ Networking (VPC, Subnets, SG) [기반]
-│  └─ RDS MySQL 준비 [선행조건]
-│     └─ Data Migration (v1 → v2 DB) [전제]
-│        └─ Redis 준비 (세션 저장소) [병렬]
-│           └─ Backend ASG 구축 [병렬]
-│              └─ Frontend ASG 구축 [병렬]
-│                 └─ AI ASG 구축 [병렬]
-│                    └─ ALB 구성 (라우팅) [통합]
-│                       └─ Route 53 Weight Routing [전환]
-│                          └─ 모니터링/검증 [지속]
-│                             └─ v1 종료 [완료]
+├─ v2 인프라 프로비저닝 (Terraform) [기반, 트래픽 0]
+│  ├─ VPC, Subnets, NAT, SG
+│  ├─ RDS MySQL
+│  ├─ RabbitMQ (Amazon MQ 또는 EC2)
+│  ├─ ALB + ASG (Target Group)
+│  └─ ECR + CI/CD Pipeline
+│
+├─ Phase A: 외부 서비스 전환 (단일 인스턴스, v1에서) [리스크 낮음]
+│  ├─ Step 1: Host MySQL → RDS 전환
+│  └─ Step 2: 로컬 메시지 브로커 → RabbitMQ 전환
+│     (이 시점에서 서버는 stateless)
+│
+├─ Phase B: v2 환경 검증 (트래픽 0, 내부 테스트) [리스크 낮음]
+│  ├─ Docker CI/CD 파이프라인 검증
+│  └─ 통합 테스트 + 부하 테스트 (100→300→900 QPS)
+│
+├─ Phase C: 트래픽 전환 [리스크 높음]
+│  ├─ Route 53 Weighted Routing (5%→30%→80%→100%)
+│  └─ 모니터링 + 롤백 대기
+│
+└─ Phase D: v1 정리 [리스크 없음]
+   ├─ v1 인스턴스 종료
+   └─ 리소스 삭제 + 회고
 ```
 
-### 6.2 상세 순서 (Week 1-9)
+### 6.2 상세 순서 (Week 1-6)
 
-**Phase 1: 기반 구축 (Week 1-2)**
-- VPC, 서브넷, NAT Gateway, VPC Endpoint 생성
-- Security Group 규칙 정의
-- IAM Role 및 정책 생성
-- RDS, Redis 프로비저닝 시작
+**Phase A: 외부 서비스 전환 — "상태 제거" (Week 1-3)**
 
-**Phase 2: 데이터 마이그레이션 (Week 2-3)**
-- v1 MySQL → v2 RDS 덤프 및 복구
-- 데이터 검증 (행 수, 체크섬)
-- RDS 엔드포인트 추출 및 애플리케이션 설정
+핵심 근거: 현재 단일 서버는 실시간 채팅을 위해 stateful한 서버이다. 트래픽 전환 전에 상태를 최대한 제거하고, 외부 서비스로 먼저 교체해야 한다.
 
-**Phase 3: 애플리케이션 준비 (Week 2-4, 병렬)**
-- ECR 리포지토리 생성
-- Docker 이미지 빌드 및 푸시
-- Launch Template 생성 (각 ASG별)
-- GitHub Actions OIDC 설정 및 CI/CD 파이프라인
+Why?
+- 상태를 유지하는 서버가 있는 채로 스케일 아웃하면, 채팅에서 실시간 메시지 교환 불가 (각 서버가 다른 구독 정보를 가짐)
+- Sticky Session을 도입해도 채팅 구독 정보를 담고 있는 세션은 각 서버마다 다르므로 문제 발생
+- DB를 먼저 분리하는 이유: 다중 서버가 각각 다른 DB를 바라보는 불상사 방지
 
-**Phase 4: 인프라 검증 (Week 4-5, 병렬)**
-- Backend ASG 부팅 → 헬스 체크 통과 확인
-- Frontend ASG 부팅 → 헬스 체크 통과 확인
-- AI ASG 부팅 → 헬스 체크 통과 확인
-- ALB 라우팅 규칙 테스트 (내부 테스트)
-- 카나리 테스트 (내부 트래픽, 10% 수준)
+**Step 1: DB → RDS 전환 (Week 1-2)**
+- Host MySQL → RDS mysqldump + Replication
+- Runbook 기반 리허설 완료 후 실행
+- PNR: RDS 엔드포인트로 애플리케이션 전환 시점
 
-**Phase 5: Strangler Fig 시작 (Week 5-6)**
-- Route 53 Weighted Routing 설정 (v1: 100%, v2: 0%)
-- 점진적 traffic shift 시작 (Day 1: 100/0 → Day 3: 90/10)
-- 모니터링 강화 (응답 시간, 에러율, 데이터 일관성)
+**Step 2: 로컬 메시지 브로커 → RabbitMQ 전환 (Week 2-3)**
+- Spring 내장 Simple Broker → RabbitMQ (STOMP over WebSocket)
+- 애플리케이션 코드 수정 필요 (메시지 발행/구독 로직)
+- 단일 인스턴스 상태에서 전환하므로 리스크 낮음
 
-**Phase 6: 점진적 트래픽 증가 (Week 6-8)**
-- 10% → 30% → 50% → 70% → 90% → 100%
-- 각 단계마다 24시간 대기 (안정성 확인)
-- 데이터 일관성 검증 (v1 vs v2 데이터 비교)
-- 문제 발생 시 즉시 이전 비율로 복구
+**Phase B: v2 환경 검증 (Week 3-4)**
 
-**Phase 7: v2 100% 전환 (Week 8)**
-- Route 53 Weight: 0 / 100
-- v1 인스턴스 자동 종료 스케줄 (1주일 후)
-- RDS, Redis 성능 모니터링 (과부하 여부)
+v2 인프라는 이미 프로비저닝되어 있음. Docker CI/CD로 v2 환경에 앱 배포 후 검증.
 
-**Phase 8: v1 정리 및 회고 (Week 8-9)**
-- v1 백업 (이전 MySQL 데이터)
-- v1 인스턴스 종료 및 EBS 삭제
-- 불필요한 보안 그룹, IAM Role 삭제
-- 마이그레이션 후기 작성 (배운 점, 개선사항)
+- Docker 이미지 빌드 → ECR Push → ASG 배포 파이프라인 검증
+- v2 환경에서 통합 테스트 (API + WebSocket + RabbitMQ + RDS 연동)
+- 부하 테스트: 100 → 300 → 900 QPS
+- Go/No-Go: 에러율 < 0.1%, p99 latency 기준 이내
 
-### 6.3 왜 이 순서인가?
+**Phase C: 트래픽 전환 (Week 4-5)**
 
-**Networking 우선:**
-- RDS, Redis 배치에 필요한 사설 서브넷 필수
-- Security Group 규칙 없이는 통신 불가능
-- VPC Endpoint 없으면 NAT 비용 과다 발생
+- Route 53 Weighted Routing: v1 100% → v2 5% → 30% → 80% → 100%
+- 각 단계별 24시간 모니터링 후 다음 단계
+- 문제 발생 시 즉시 v1으로 복구 (Route 53 weight 변경, ~1분)
 
-**Data Migration 선행:**
-- 애플리케이션은 데이터베이스 없이 시작 불가
-- RDS 준비까지 시간 소요 (~30분 프로비저닝 + 검증)
+**Phase D: v1 정리 (Week 5-6)**
 
-**ASG 병렬 구축:**
-- 각 ASG는 독립적 (의존성 없음)
-- 동시 진행 → 전체 일정 단축
+- v1 인스턴스는 2주간 유지 (롤백 버퍼)
+- v2 안정화 확인 후 v1 종료
+- 불필요한 리소스 삭제, 마이그레이션 회고
 
-**ALB 통합:**
-- 모든 ASG 준비 후 라우팅 규칙 설정
-- 조기 설정 → 헬스 체크 실패로 불필요한 대기
+### 6.3 왜 "상태 제거 → 트래픽 전환" 순서인가?
 
-**Route 53 가중치 라우팅 마지막:**
-- v1, v2 모두 준비되어야 전환 가능
-- 전환 전 내부 테스트 완료 필수
+**가장 큰 변화점 4가지:**
+1. 빅뱅 수작업 배포 → Docker 기반 CI/CD
+2. 단일 서버 → 다중 서버 (ALB + ASG)
+3. Host MySQL → RDS
+4. 로컬 메시지 브로커 → 외부 메시지 브로커 (RabbitMQ)
+
+현재 단일 서버는 채팅 구독 정보를 서버 메모리에 보관하는 stateful 서버이다.
+이 상태로 다중 서버 구조로 전환하면:
+- 유저 A(서버1)와 유저 B(서버2)가 같은 채팅방이지만 메시지 교환 불가
+- Sticky Session으로도 해결 불가 (구독 정보 자체가 서버별로 다름)
+
+따라서 트래픽 전환(스케일 아웃) 전에:
+1. DB를 외부로 분리 → 모든 서버가 동일한 데이터 소스 사용 보장
+2. 메시지 브로커를 외부로 분리 → 모든 서버가 동일한 메시지 채널 공유 보장
+이 두 가지가 완료되면 서버는 stateless가 되어 안전하게 스케일 아웃 가능.
+
+**왜 인프라 프로비저닝과 트래픽 전환을 분리하는가?**
+
+v2 인프라를 미리 띄워두는 것과 트래픽을 전환하는 것은 별개의 작업이다.
+- 프로비저닝: Terraform apply로 ALB, ASG, RDS, RabbitMQ 생성 → 트래픽 0, 리스크 없음
+- 검증: v2 환경에 앱을 배포하고 부하 테스트 → 트래픽 0, 리스크 없음
+- 전환: Route 53으로 점진적 트래픽 이동 → 여기가 유일한 리스크 구간
+
+미리 프로비저닝해둔 인프라에서 충분히 검증한 후, 확신이 생기면 트래픽을 전환한다.
+
+**리허설 vs Dev/Prod 전략이 다른 이유?**
+
+- 리허설: 300 QPS 부하를 걸며 무중단 마이그레이션 가능 여부 + 다운타임 지표 측정
+- Dev/Prod: 실제 사용자가 적으므로 점검 시간을 잡고 중단 배포로 한 번에 교체
+  - v2 인프라 프로비저닝
+  - 테스트 통과한 Docker CI/CD로 GitHub Actions 변경
+  - v1 → v2로 한 번에 교체
 
 ---
 
@@ -842,28 +873,38 @@ Dependencies:
 
 **참조 문서:** 03-rds-mysql.md
 
-### 7.4 ElastiCache Redis 프로비저닝 (Week 1-2)
+### 7.4 RabbitMQ 프로비저닝 (Week 1-2)
 
 **항목:**
-1. Redis 클러스터 생성
-   - 엔진: Redis 6.x (또는 7.x)
-   - 노드 타입: cache.t4g.micro (1 노드)
-   - 서브넷 그룹: 사설 서브넷 (10.0.21.0/24)
+1. RabbitMQ 배포 (Amazon MQ 또는 EC2)
+   - 엔진: RabbitMQ 3.12+
+   - 노드 설정: 단일 노드 또는 클러스터 (향후 HA 확장 가능)
+   - 배치: 사설 서브넷 (10.0.21.0/24)
+   - EBS: 20GB (메시지 큐 용도)
 
-2. 파라미터 그룹
-   - maxmemory-policy: allkeys-lru (메모리 초과 시 LRU 정책)
-   - timeout: 300초
-   - tcp-keepalive: 300초
+2. Virtual Host 및 사용자 설정
+   - Virtual Host: `/billage` 생성
+   - 사용자: `billage_app` 생성 (Backend용)
+   - 권한: vhost 내 모든 자원에 대한 configure, write, read 권한
+   - Secrets Manager에 비밀번호 저장
 
-3. Security Group
-   - Backend, Frontend, AI SG에서만 포트 6379 접근
+3. RabbitMQ 파라미터 설정
+   - Prefetch: 32 (채팅 메시지 처리량)
+   - Message TTL: 설정 안함 (영구 보관)
+   - Dead Letter Exchange: 설정 (메시지 손실 방지)
+   - Connection timeout: 60초
+   - Heartbeat: 60초
 
-4. 암호화 및 인증
-   - In-transit encryption: 활성화
-   - At-rest encryption: 활성화
-   - AUTH token: 생성하여 Secrets Manager 저장
+4. Security Group
+   - Backend SG: 포트 5672 (AMQP) 접근 허용
+   - Frontend SG: 포트 61613 (STOMP WebSocket) 접근 필요한 경우
 
-**참조 문서:** 04-redis.md
+5. 모니터링 및 백업
+   - CloudWatch 알람: Memory 80%, Connection count > 500
+   - 설정 파일 백업 (Infrastructure as Code)
+   - 스냅샷: 자동 백업 (24시간마다)
+
+**참조 문서:** 04-rabbitmq.md
 
 ### 7.5 ECR 리포지토리 생성 (Week 1)
 
@@ -931,95 +972,124 @@ Dependencies:
 
 ### 8.1 캘린더 기반 계획
 
-**Week 1 (Day 1-7): 기반 구축**
-- Day 1-2: VPC, 서브넷, NAT, Endpoint 생성
-- Day 2-3: Security Group, IAM Role 설정
-- Day 3-4: RDS, Redis 프로비저닝 시작
-- Day 4-5: 데이터 마이그레이션 (백업 → RDS 복원)
-- Day 6-7: 데이터 검증, ECR 리포지토리 생성
+**Week 1 (Day 1-7): 기반 구축 (병렬 작업)**
+- Day 1-2: VPC, 서브넷, NAT, Endpoint 생성 (DevOps)
+- Day 2-3: Security Group, IAM Role 설정 (DevOps)
+- Day 3: RDS, RabbitMQ 프로비저닝 시작 (DevOps)
+- Day 4: 데이터 마이그레이션 (mysqldump + RDS 복원) (DBA)
+- Day 5-6: 데이터 검증, ECR 리포지토리 생성 (DBA + DevOps)
+- Day 7: v2 인프라 기본 완성 (DevOps 검수)
 
-**Week 2 (Day 8-14): 애플리케이션 준비**
-- Day 8: Docker 이미지 빌드 (dev 브랜치)
-- Day 9-10: Launch Template 생성 (Backend, Frontend, AI)
-- Day 11: GitHub Actions OIDC 설정
-- Day 12-13: CI/CD 파이프라인 테스트 (내부 배포)
-- Day 14: Smoke test 및 수정
+**Phase A: 외부 서비스 전환 (Week 1-3, v1에서 수행)**
 
-**Week 3 (Day 15-21): ASG 구축 및 테스트**
-- Day 15: Backend ASG 생성 및 부팅
-- Day 16: Frontend ASG 생성 및 부팅
-- Day 17: AI ASG 생성 및 부팅
-- Day 18-19: 헬스 체크 검증, 자동 스케일링 테스트
-- Day 20: ALB 생성 및 라우팅 규칙 설정
-- Day 21: 통합 테스트 (Route 53 가중치 0/100으로 v2 트래픽 없음)
+**Week 1-2 (Day 1-10): Step 1 - DB 전환**
+- Day 1-4: RDS 프로비저닝 및 데이터 마이그레이션 완료
+- Day 5-7: 애플리케이션 RDS 연결 코드 수정 (JDBC URL 변경)
+- Day 8: Runbook 리허설 완료 (실제 전환 절차 검증)
+- Day 9: 단일 인스턴스에서 Host MySQL → RDS 전환 실행
+- Day 10: 전환 후 모니터링 (응답 시간, 에러율 정상 확인)
 
-**Week 4 (Day 22-28): Strangler Fig Phase 1**
-- Day 22: Route 53 가중치 조정 (v1: 100, v2: 0) → 배포
-- Day 23-24: 모니터링 (에러, 응답 시간, DB 로드)
-- Day 25-26: 마이너 이슈 수정, 모니터링 대시보드 구성
-- Day 27: 수동 테스트 (v2 접근 가능하도록 별도 URL)
-- Day 28: 검토 회의, 다음 단계 승인
+**Week 2-3 (Day 11-21): Step 2 - 메시지 브로커 전환**
+- Day 11-14: RabbitMQ 프로비저닝 및 Spring 통합 코드 작성
+  - Spring Simple Broker → RabbitMQ STOMP Broker 전환
+  - WebSocket 엔드포인트 테스트
+- Day 15: Runbook 리허설 완료
+- Day 16: 단일 인스턴스에서 Simple Broker → RabbitMQ 전환 실행
+- Day 17: 채팅 기능 테스트 (메시지 발행/구독 정상 확인)
+- Day 18-21: 안정성 모니터링 (WebSocket 동시 연결 수, 메시지 지연)
 
-**Week 5-6 (Day 29-42): Strangler Fig Phase 2-3**
-- Day 29: v2 traffic 10% 증가 (v1: 90, v2: 10)
-- Day 30-31: 모니터링 (에러 0%, 응답 시간 동등)
-- Day 32: v2 traffic 30% 증가 (v1: 70, v2: 30)
-- Day 33-34: 모니터링
-- Day 35: v2 traffic 50% 증가 (v1: 50, v2: 50)
-- Day 36-38: **데이터 검증 집중** (v1 vs v2 데이터 불일치 확인)
-- Day 39: v2 traffic 70% 증가 (v1: 30, v2: 70)
-- Day 40-42: 최종 검증
+**Phase B: v2 환경 검증 (Week 3-4, 트래픽 0)**
 
-**Week 7 (Day 43-49): 완전 전환**
-- Day 43: v2 traffic 90% 증가 (v1: 10, v2: 90)
-- Day 44-45: 모니터링 (최종 확인)
-- Day 46: v2 traffic 100% 증가 (v1: 0, v2: 100)
-- Day 47: v1 인스턴스 자동 종료 스케줄 (1주일 후)
-- Day 48: 성능 튜닝 (RDS, Redis 모니터링, 파라미터 조정)
-- Day 49: 검토 회의
+**Week 3-4 (Day 15-28): 애플리케이션 및 ASG 구축**
+- Day 15-18: Docker 이미지 빌드 및 ECR 푸시 (Backend팀 + DevOps)
+  - Phase A의 RDS/RabbitMQ 변경사항 포함
+  - 모든 환경변수 Secrets Manager에서 주입
+- Day 19-20: Launch Template 생성 및 User Data 검증
+- Day 21: GitHub Actions OIDC 및 CI/CD 파이프라인 구성
+- Day 22: ASG 생성 (Backend, Frontend, AI) 및 부팅
+- Day 23-24: 헬스 체크 통과, 통합 테스트 (API, WebSocket, RabbitMQ 연동)
+- Day 25-28: 부하 테스트 (100 → 300 → 900 QPS)
+  - 에러율, 응답 시간, 데이터베이스 성능 측정
+  - Go/No-Go 결정 (4/4 팀 만장일치)
 
-**Week 8-9 (Day 50-63): 정리 및 최적화**
-- Day 50-56: v1 백업 유지, RDS/Redis 성능 모니터링
-- Day 57: v1 EIP 해제, 보안 그룹 정리
-- Day 58-60: 마이그레이션 후기 작성, 비용 분석
-- Day 61-63: 문서 업데이트, 운영 가이드 작성
+**Phase C: 트래픽 전환 (Week 4-5)**
+
+**Week 4-5 (Day 29-40): Route 53 Weighted Routing**
+- Day 29: Route 53 설정 (v1: 100%, v2: 0%)
+- Day 30-31: 모니터링 베이스라인 수집 (v1 성능 baseline)
+- Day 32: v2 트래픽 5% (v1: 95%, v2: 5%) - 카나리
+  - 에러율 < 0.5% 확인
+- Day 33-34: 모니터링 + v2 로그 분석
+- Day 35: v2 트래픽 30% (v1: 70%, v2: 30%)
+  - 에러율 < 0.1% 확인
+- Day 36-37: 모니터링
+- Day 38: v2 트래픽 80% (v1: 20%, v2: 80%)
+  - 최종 검증: 데이터 일관성, 응답 시간 동등
+- Day 39-40: v2 안정성 최종 확인
+
+**Phase D: v1 정리 (Week 5-6)**
+
+**Week 5-6 (Day 41-42): 완전 전환 및 정리**
+- Day 41: v2 트래픽 100% (v1: 0%, v2: 100%)
+- Day 42: v1 인스턴스 백업, 보안 그룹 정리
+  - v1 EBS 스냅샷 생성
+  - 1주일 후 자동 종료 스케줄 설정 (롤백 버퍼)
+- Day 42+: v2 성능 모니터링 (7일간), 회고 진행
 
 ### 8.2 마일스톤 및 체크포인트
 
 | 마일스톤 | 날짜 | 체크리스트 |
 |---------|------|----------|
-| **기반 구축 완료** | Day 7 | VPC, RDS, Redis, ECR 모두 준비 |
-| **데이터 마이그레이션 완료** | Day 7 | v1 DB → v2 RDS 검증 완료, 10개 샘플 쿼리 정상 |
-| **v2 애플리케이션 배포** | Day 14 | Docker 이미지 ECR에 있음, 헬스 체크 성공 |
-| **ASG 구축 완료** | Day 21 | 3개 ASG 모두 healthy 상태, ALB 라우팅 정상 |
-| **Strangler Fig 시작** | Day 22 | Route 53 Weighted Routing 활성화, v1 100% |
-| **50% Traffic Shift** | Day 35 | v1: 50%, v2: 50%, 에러율 < 0.1% |
-| **완전 전환** | Day 46 | v2 100%, v1 트래픽 0 (종료 대기) |
-| **마이그레이션 완료** | Day 57 | v1 인스턴스 종료, RDS 성능 안정화 |
+| **기반 구축 완료** | Day 7 | VPC, RDS, RabbitMQ 프로비저닝 + 데이터 마이그레이션 완료 |
+| **Phase A 완료 (RDS 전환)** | Day 10 | 단일 서버에서 Host MySQL → RDS 전환 + 모니터링 정상 |
+| **Phase A 완료 (RabbitMQ 전환)** | Day 21 | 단일 서버에서 Simple Broker → RabbitMQ 전환 + 채팅 테스트 정상 |
+| **Phase B 완료 (v2 배포)** | Day 28 | Docker 이미지 빌드 완료, ASG 구축 완료, 부하 테스트 통과 (900 QPS) |
+| **Phase C 시작 (카나리)** | Day 32 | Route 53 활성화, v2 5% 트래픽, 에러율 < 0.5% |
+| **30% Traffic Shift** | Day 35 | v1: 70%, v2: 30%, 에러율 < 0.1% |
+| **80% Traffic Shift** | Day 38 | v1: 20%, v2: 80%, 데이터 일관성 100% |
+| **완전 전환** | Day 41 | v2 100%, v1 트래픽 0 (롤백 버퍼 유지) |
+| **마이그레이션 완료** | Day 42 | v1 백업 완료, Phase D 정리 시작 |
 
 ### 8.3 "Point of No Return" (PNR) 정의
 
 각 Phase마다 되돌릴 수 없는 지점이 존재:
 
-**Phase 1 PNR (Day 22):**
-- Route 53 Weighted Routing 활성화 시점
-- 이전: v2 무시하고 v1만 수정 가능
-- 이후: v1, v2 모두 병렬 모니터링 필요
+**Phase A PNR (Day 9, Host MySQL → RDS 전환):**
+- v1 단일 서버에서 Host MySQL → RDS로 실제 전환 시점
+- 이전: Runbook 리허설 가능, 롤백 간단 (RDS 미사용)
+- 이후: RDS 활성 데이터베이스로 사용, v1과 v2 모두 RDS 의존
+- 롤백: Host MySQL에서 최신 스냅샷 복구 (10분)
 
-**Phase 3 PNR (Day 35, 50% Traffic):**
-- v2 트래픽이 실제 사용자의 50%
-- 데이터 검증 필수 (이후 v1 수정 불가)
-- 만약 데이터 문제 발견 → 즉시 v1로 복구 (30분)
+**Phase A PNR 2 (Day 16, Simple Broker → RabbitMQ 전환):**
+- v1 단일 서버에서 메시지 브로커 전환 시점
+- 이전: 기존 Simple Broker 로직 유지 가능
+- 이후: RabbitMQ 메시지 채널 활성, 모든 실시간 기능이 RabbitMQ 의존
+- 롤백: 애플리케이션 코드를 Simple Broker로 복구 (15분 + 배포)
 
-**Phase 5 PNR (Day 46, 100% Traffic):**
-- v2 완전 전환, v1 종료 결정
-- 이후: v1 백업은 보관하지만 활성 인스턴스 삭제
-- 롤백: RDS 스냅샷에서 복구 (30분)
+**Phase C PNR (Day 32, 5% Canary):**
+- Route 53 Weighted Routing 활성화 시점 (v2로 첫 트래픽 진입)
+- 이전: v2 환경은 모의 테스트만 가능, 실제 트래픽 영향 0
+- 이후: v1, v2 동시 모니터링 필수, 실제 사용자 일부가 v2 사용
+- 롤백: Route 53 Weight를 v1: 100%, v2: 0% 변경 (1분)
 
-**Phase 6 PNR (Day 57, v1 삭제):**
-- v1 EBS 볼륨 삭제 시점
-- 이후: 설정 파일 등 물리적 복구 불가능
-- 최종 결정
+**Phase C PNR 2 (Day 38, 80% Traffic):**
+- v2 트래픽이 실제 사용자의 대다수
+- 이전: 데이터 검증 추가 시간 가능, 문제 발견 시 v1로 복구 가능
+- 이후: v2 트래픽이 압도적 → 데이터 일관성 최종 검증 필수
+- 롤백: Route 53 복구 (1분), 하지만 v1이 v2 데이터 변경사항을 따라가지 못할 가능성 높음
+
+**Phase D PNR (Day 41, 100% Traffic Shift):**
+- v2 완전 전환, v1 트래픽 0% 선언
+- 이전: v1로 즉시 롤백 가능 (Route 53 변경)
+- 이후: v1 백업은 유지하지만 활성 서비스가 아님
+- 롤백: 가능하지만 v1이 새로운 데이터를 받지 못함 (데이터 손실 위험)
+- 대신 RDS 스냅샷에서 복구 (30분)
+
+**Phase D PNR 2 (Day 42+, v1 인스턴스 정리):**
+- v1 EBS 스냅샷 생성 후, 1주일 후 자동 종료 스케줄 설정
+- 이전: v1 복구 가능 (EBS 데이터 물리적 존재)
+- 이후: 인스턴스 삭제 (설정 파일 등 물리적 접근 불가)
+- 하지만 RDS 스냅샷이 있으므로 데이터 복구는 여전히 가능
 
 ---
 
@@ -1031,23 +1101,24 @@ Dependencies:
 |---|--------|------|--------|--------|----------|------|
 | 1 | RDS 프로비저닝 지연 | 중 | 높음 | **높음** | AWS Support 연락, 사전 quota 증가 | DevOps |
 | 2 | 데이터 마이그레이션 실패 | 낮음 | 매우높음 | **매우높음** | 덤프 검증 3회, 샘플 쿼리 테스트 | DevOps + DBA |
-| 3 | Docker 이미지 빌드 실패 | 중 | 중간 | 중간 | 로컬에서 먼저 빌드 테스트, CI/CD 테스트 | Backend팀 |
-| 4 | Route 53 DNS 캐시 이슈 | 낮음 | 중간 | 중간 | TTL 300초로 사전 설정, 점진적 가중치 변경 | DevOps |
-| 5 | v2에서 예상 못한 에러 (Strangler 중) | 중 | 높음 | **높음** | 카나리 테스트(10%)에서 검출, 즉시 v1로 복구 | 전체 |
-| 6 | 데이터 불일치 발견 (Phase 3) | 낮음 | 매우높음 | **매우높음** | 48시간 inner-phase 데이터 검증, 시간 연장 | DevOps + Backend |
-| 7 | RDS 성능 부족 (CPU > 90%) | 중 | 높음 | **높음** | db.t4g.small로 즉시 업그레이드, 쿼리 최적화 | DevOps + Backend |
-| 8 | Redis 메모리 부족 | 낮음 | 중간 | 중간 | 모니터링으로 사전 감지, cache.t4g.small으로 업그레이드 | DevOps |
-| 9 | 배포 중 Connection Reset (세션 손실) | 중 | 중간 | 중간 | Connection Draining (300초), 클라이언트 재시도 로직 | Frontend팀 |
-| 10 | ALB 타겟 그룹 헬스 체크 실패 | 중 | 높음 | **높음** | Health check path 정의 (/actuator/health), threshold 3회 연속 실패 | DevOps + Backend |
-| 11 | Security Group 규칙 누락 | 낮음 | 높음 | **중간** | 체크리스트 검증 (netstat -tlnp), 통합 테스트 | DevOps |
-| 12 | IAM Role 권한 부족 | 낮음 | 중간 | 중간 | CloudTrail 로그 확인, 사후 권한 추가 | DevOps + Security |
-| 13 | v1에서 신규 데이터 발생 (Strangler 중) | 낮음 | 매우높음 | **매우높음** | 데이터 마이그레이션 도구 (CDC, 이벤트 리플리케이션) 미리 구성 | Backend + DevOps |
-| 14 | GitHub Actions 시크릿 노출 | 매우낮음 | 매우높음 | **높음** | GitHub 리포지토리 보안 설정, 정기 검토 | Security |
-| 15 | 비용 초과 (Dual-run) | 중 | 낮음 | 낮음 | 예산 알람 설정 (매일 체크), 사전 비용 분석 | Finance |
+| 3 | RabbitMQ 프로비저닝/연동 실패 | 중 | 높음 | **높음** | 로컬에서 Spring STOMP 통합 테스트 사전 완료 | Backend + DevOps |
+| 4 | Docker 이미지 빌드 실패 | 중 | 중간 | 중간 | 로컬에서 먼저 빌드 테스트, CI/CD 테스트 | Backend팀 |
+| 5 | Route 53 DNS 캐시 이슈 | 낮음 | 중간 | 중간 | TTL 300초로 사전 설정, 점진적 가중치 변경 | DevOps |
+| 6 | v2에서 예상 못한 에러 (Phase C 중) | 중 | 높음 | **높음** | 카나리 테스트(5%)에서 검출, 즉시 v1로 복구 (1분) | 전체 |
+| 7 | WebSocket/RabbitMQ 메시지 손실 | 중 | 높음 | **높음** | RabbitMQ 메시지 영속성 설정, 재연결 로직 구현 | Backend + DevOps |
+| 8 | RDS 성능 부족 (CPU > 90%) | 중 | 높음 | **높음** | db.t4g.small로 즉시 업그레이드, 쿼리 최적화 | DevOps + Backend |
+| 9 | RabbitMQ 메모리/연결 부족 | 낮음 | 중간 | 중간 | 모니터링으로 사전 감지, 인스턴스 업그레이드 | DevOps |
+| 10 | 배포 중 Connection Reset (세션/메시지 손실) | 중 | 중간 | 중간 | Connection Draining (300초), RabbitMQ 재연결 로직 | Frontend + Backend팀 |
+| 11 | ALB 타겟 그룹 헬스 체크 실패 | 중 | 높음 | **높음** | Health check path 정의 (/actuator/health), threshold 3회 연속 실패 | DevOps + Backend |
+| 12 | Security Group 규칙 누락 (RabbitMQ) | 낮음 | 높음 | **중간** | 체크리스트 검증 (telnet, 포트 5672 연결 테스트), 통합 테스트 | DevOps |
+| 13 | IAM Role 권한 부족 | 낮음 | 중간 | 중간 | CloudTrail 로그 확인, 사후 권한 추가 | DevOps + Security |
+| 14 | v1에서 신규 데이터 발생 (Phase C 중) | 낮음 | 매우높음 | **매우높음** | 데이터 마이그레이션 도구 (CDC, 이벤트 리플리케이션) 미리 구성 | Backend + DevOps |
+| 15 | GitHub Actions 시크릿 노출 | 매우낮음 | 매우높음 | **높음** | GitHub 리포지토리 보안 설정, 정기 검토 | Security |
+| 16 | 비용 초과 (Dual-run) | 중 | 낮음 | 낮음 | 예산 알람 설정 (매일 체크), 사전 비용 분석 | Finance |
 
 ### 9.2 우선순위별 대응
 
-**Priority 1: 데이터 마이그레이션 실패 (Risk #2, #13)**
+**Priority 1: Phase A 전환 (RDS + RabbitMQ) 실패 (Risk #2, #3, #7, #14)**
 
 *사전 조치:*
 - v1 MySQL에서 정기적(6시간마다) 백업 이미 진행 중
@@ -1055,52 +1126,65 @@ Dependencies:
   1. 덤프 행 수 확인 (`SELECT COUNT(*)`)
   2. 체크섬 계산 (모든 테이블)
   3. 샘플 쿼리 10개 수행 (복잡한 JOIN 포함)
+- RabbitMQ 연동 테스트: Spring STOMP 클라이언트 로컬 환경에서 메시지 발행/구독 확인
+  - WebSocket 동시 연결 테스트 (최소 100 연결)
+  - 메시지 영속성 설정 확인 (durable queues)
 
-*발생 시 절차:*
-- Strangler Fig Phase 중 신규 데이터 발생 시 → Event-driven replication 사용
-  - 예: 사용자가 새 예약 생성 → Backend가 Kinesis/SQS에 메시지 발행 → 동기화 Lambda 처리
-  - v1 MySQL과 v2 RDS 동시 기록
+*Phase A 중 발생 시 절차:*
+- RDS 전환 실패: Host MySQL로 즉시 복구 (10분)
+- RabbitMQ 전환 실패: Spring Simple Broker로 즉시 복구 (15분)
+- Phase C (Strangler) 시작 전에는 v1만 활성이므로, 실제 사용자 영향 최소화
 
-**Priority 2: RDS 성능 부족 (Risk #7)**
+**Priority 2: RDS + RabbitMQ 성능 부족 (Risk #7, #8, #9)**
 
 *모니터링:*
-- CloudWatch 알람: CPU > 80% (5분 평균)
-- 응답 시간: P95 > 250ms → 경고
+- RDS: CloudWatch 알람: CPU > 80% (5분 평균), 응답 시간 P95 > 250ms → 경고
+- RabbitMQ: 메모리 > 80%, 연결 수 > 500 → 경고
 
 *확장 전략:*
-- 즉시: db.t4g.small로 업그레이드 (1시간)
-- 병렬: 느린 쿼리 분석 및 인덱스 추가
-- 장기: RDS Read Replica 추가 (읽기 전용 쿼리 분산)
+- RDS: db.t4g.small로 즉시 업그레이드 (1시간)
+- RabbitMQ: Amazon MQ 인스턴스 업그레이드 또는 클러스터 전환 (2시간)
+- 병렬: 느린 쿼리 분석 및 인덱스 추가, RabbitMQ prefetch 조정
 
-**Priority 3: v2 예상 못한 에러 (Risk #5)**
+**Priority 3: v2 예상 못한 에러 (Risk #6, #10)**
 
-*Strangler 단계별 에러 처리:*
-- 10% (Day 29): 에러율 상한 0.5% → 초과 시 즉시 0%로 복구
-- 30% (Day 32): 에러율 상한 0.1%
-- 50% (Day 35): 에러율 상한 0.05% (매우 엄격)
-- 70% 이상: 에러율 상한 0.01% (무중단 수준)
+*Phase C 단계별 에러 처리 기준:*
+- 5% 카나리 (Day 32): 에러율 상한 0.5% → 초과 시 즉시 0%로 복구
+- 30% (Day 35): 에러율 상한 0.1%
+- 80% (Day 38): 에러율 상한 0.05% (매우 엄격)
+- 100% (Day 41): 에러율 상한 0.01% 유지 확인
 
-*롤백 절차:*
+*롤백 절차 (5분 이내):*
 1. Route 53 Weight를 이전 상태로 변경 (DNS TTL 300초)
-2. CloudWatch Logs에서 에러 추적
-3. 팀별 분석 회의 (최대 6시간)
-4. 버그 수정 후 새 Docker 이미지 푸시
-5. 재시도
+2. CloudWatch Logs에서 에러 추적 (특히 WebSocket/RabbitMQ 관련)
+3. v2 로그 분석 + 팀별 상황 회의 (최대 10분)
+4. 버그 분류:
+   - Application 버그: 수정 후 새 Docker 이미지 푸시 → 재시도
+   - Infrastructure 버그: Security Group/RabbitMQ 설정 수정 → 재시도
+   - 알 수 없음: 즉시 v1로 100% 복구 → 심화 분석
 
-**Priority 4: 보안 그룹/IAM 설정 누락 (Risk #11, #12)**
+**Priority 4: 보안 그룹/IAM 설정 누락 (Risk #12, #13)**
 
 *사전 체크리스트:*
 ```
 Network Connectivity:
-☐ Backend → RDS (3306) 통신 가능 (telnet 테스트)
-☐ Backend → Redis (6379) 통신 가능
-☐ ALB → Backend (8080) 통신 가능
+☐ Backend → RDS (3306) 통신 가능 (telnet/mysql 테스트)
+☐ Backend → RabbitMQ (5672) 통신 가능 (telnet 테스트)
+☐ ALB → Backend (8080) 통신 가능 (health check 통과)
 ☐ NAT Gateway → ECR, S3 (443) 통신 가능
+☐ RabbitMQ Management UI → Backend (15672) 접근 불필요 (내부용)
 
 IAM Verification:
-☐ Backend IAM Role이 ECR, S3, RDS, Secrets Manager read 권한 있음
+☐ Backend IAM Role이 ECR, S3, RDS, RabbitMQ, Secrets Manager read 권한 있음
 ☐ GitHub Actions OIDC가 ECR push, Launch Template update 권한 있음
 ☐ CloudWatch Logs에 애플리케이션 로그 기록됨
+☐ Secrets Manager에 RabbitMQ 사용자명/비밀번호 저장됨
+
+RabbitMQ Configuration:
+☐ Virtual Host `/billage` 생성
+☐ 사용자 생성 (Backend용) + 권한 설정
+☐ Message persistence 활성화 (durable queues)
+☐ Prefetch 설정 (권장: 32)
 ```
 
 ---
@@ -1267,18 +1351,19 @@ Severity Levels:
 | **01-networking.md** | DevOps | VPC 설계, 서브넷, NAT, Endpoint 상세 설정 |
 | **02-iam-oidc.md** | DevOps + Security | IAM Role, 정책, GitHub Actions OIDC 구성 |
 | **03-rds-mysql.md** | DBA + DevOps | RDS 생성, 파라미터 그룹, 백업, 모니터링 |
-| **04-redis.md** | DevOps | ElastiCache Redis 구성, 클라이언트 설정 |
+| **04-rabbitmq.md** | Backend + DevOps | RabbitMQ 프로비저닝, Spring STOMP 통합, 메시지 설정 |
 | **05-ecr.md** | DevOps | ECR 리포지토리, 라이프사이클, Docker 이미지 가이드 |
-| **06-secrets-manager.md** | DevOps + Security | 비밀값 저장, 로테이션, 접근 제어 |
+| **06-secrets-manager.md** | DevOps + Security | 비밀값 저장, 로테이션, 접근 제어 (DB, RabbitMQ, JWT 포함) |
 | **07-data-migration.md** | DBA + Backend | MySQL 덤프, RDS 복구, 검증 프로세스 |
-| **08-launch-templates.md** | DevOps + Backend | Launch Template 작성, User Data, 스크립트 |
-| **09-asg-setup.md** | DevOps | ASG 생성, 스케일링 정책, 헬스 체크 |
-| **10-alb-routing.md** | DevOps | ALB 라우팅 규칙, 타겟 그룹, SSL |
-| **11-github-actions.md** | Backend + DevOps | CI/CD 파이프라인, Docker build, ECR push |
-| **12-strangler-fig.md** | DevOps | Route 53 가중치 라우팅, 트래픽 전환 |
-| **13-monitoring-dashboards.md** | DevOps | CloudWatch, Grafana 대시보드, 알람 |
-| **14-runbook-operations.md** | DevOps | 운영 매뉴얼, 공통 문제 해결 |
-| **15-cost-analysis.md** | Finance + DevOps | 비용 분석, 예산, 절감 기회 |
+| **08-phase-a-migration.md** | Backend + DevOps | Phase A 상세 (RDS 전환, RabbitMQ 전환, 리허설 runbook) |
+| **09-launch-templates.md** | DevOps + Backend | Launch Template 작성, User Data, 스크립트 |
+| **10-asg-setup.md** | DevOps | ASG 생성, 스케일링 정책, 헬스 체크 |
+| **11-alb-routing.md** | DevOps | ALB 라우팅 규칙, 타겟 그룹, SSL |
+| **12-github-actions.md** | Backend + DevOps | CI/CD 파이프라인, Docker build, ECR push |
+| **13-phase-c-strangler.md** | DevOps | Phase C 상세 (Route 53 가중치 라우팅, 트래픽 전환, 모니터링) |
+| **14-monitoring-dashboards.md** | DevOps | CloudWatch, Grafana 대시보드, 알람 (RabbitMQ 포함) |
+| **15-runbook-operations.md** | DevOps | 운영 매뉴얼, 공통 문제 해결 (RabbitMQ 장애 대응) |
+| **16-cost-analysis.md** | Finance + DevOps | 비용 분석, 예산, 절감 기회 |
 
 ---
 
