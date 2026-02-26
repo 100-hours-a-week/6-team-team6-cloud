@@ -46,7 +46,76 @@ data "aws_route53_zone" "main" {
 
 data "aws_caller_identity" "current" {}
 
-# Private Subnets은 shared/rds/dev에서 생성
+# Private Subnets (RDS용)은 shared/rds/dev에서 생성
+
+#==============================================================================
+# Private Subnets (EC2용) - VPN NAT 경유 인터넷 접근
+#==============================================================================
+resource "aws_subnet" "private_a" {
+  vpc_id                  = data.aws_vpc.existing.id
+  cidr_block              = var.private_subnet_cidr_a
+  availability_zone       = "${var.aws_region}a"
+  map_public_ip_on_launch = false
+
+  tags = {
+    Name = "${var.project_name}-${var.env}-v2-private-subnet-a"
+    Type = "private"
+  }
+}
+
+resource "aws_subnet" "private_c" {
+  vpc_id                  = data.aws_vpc.existing.id
+  cidr_block              = var.private_subnet_cidr_c
+  availability_zone       = "${var.aws_region}c"
+  map_public_ip_on_launch = false
+
+  tags = {
+    Name = "${var.project_name}-${var.env}-v2-private-subnet-c"
+    Type = "private"
+  }
+}
+
+# VPC Peering 참조 (Management VPC와의 Peering)
+data "aws_vpc_peering_connection" "management" {
+  filter {
+    name   = "accepter-vpc-info.vpc-id"
+    values = [data.aws_vpc.existing.id]
+  }
+
+  filter {
+    name   = "status-code"
+    values = ["active"]
+  }
+}
+
+# Private Route Table - 0.0.0.0/0 → VPC Peering (VPN Server NAT 경유)
+resource "aws_route_table" "private" {
+  vpc_id = data.aws_vpc.existing.id
+
+  route {
+    cidr_block                = "0.0.0.0/0"
+    vpc_peering_connection_id = data.aws_vpc_peering_connection.management.id
+  }
+
+  route {
+    cidr_block                = var.management_vpc_cidr
+    vpc_peering_connection_id = data.aws_vpc_peering_connection.management.id
+  }
+
+  tags = {
+    Name = "${var.project_name}-${var.env}-v2-private-rt"
+  }
+}
+
+resource "aws_route_table_association" "private_a" {
+  subnet_id      = aws_subnet.private_a.id
+  route_table_id = aws_route_table.private.id
+}
+
+resource "aws_route_table_association" "private_c" {
+  subnet_id      = aws_subnet.private_c.id
+  route_table_id = aws_route_table.private.id
+}
 
 # Public Subnet 추가 (ALB용 - 2 AZ 필요)
 resource "aws_subnet" "public_c" {
@@ -87,7 +156,8 @@ resource "aws_route_table_association" "public_c" {
   route_table_id = aws_route_table.public_c.id
 }
 
-# Private Route Table은 shared/rds/dev에서 생성
+# Private Route Table (RDS용)은 shared/rds/dev에서 별도 생성
+# Private Route Table (EC2용)은 위에서 생성 - VPN NAT 경유 인터넷 접근
 
 #==============================================================================
 # Security Groups
@@ -235,12 +305,9 @@ resource "aws_security_group" "ai" {
 # RDS / ElastiCache 참조 (shared에서 생성)
 #==============================================================================
 data "aws_db_instance" "main" {
-  db_instance_identifier = "${var.project_name}-${var.env}-mysql"
+  db_instance_identifier = "${var.project_name}-${var.env}-v2-mysql"
 }
 
-data "aws_elasticache_cluster" "main" {
-  cluster_id = "${var.project_name}-${var.env}-redis"
-}
 
 #==============================================================================
 # ALB (Application Load Balancer)
@@ -504,12 +571,10 @@ resource "aws_launch_template" "backend" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user_data_backend.sh.tpl", {
-    env            = var.env
-    project_name   = var.project_name
-    aws_region     = var.aws_region
-    ecr_registry   = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
-    rds_endpoint   = data.aws_db_instance.main.endpoint
-    redis_endpoint = data.aws_elasticache_cluster.main.cache_nodes[0].address
+    env          = var.env
+    project_name = var.project_name
+    aws_region   = var.aws_region
+    ecr_registry = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
   }))
 
   tag_specifications {
@@ -561,7 +626,6 @@ resource "aws_launch_template" "frontend" {
     project_name = var.project_name
     aws_region   = var.aws_region
     ecr_registry = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
-    backend_url  = "https://v2.${var.env}.${var.domain_name}/api"
   }))
 
   tag_specifications {
@@ -638,7 +702,7 @@ resource "aws_autoscaling_group" "backend" {
   desired_capacity    = var.backend_asg_desired
   min_size            = var.backend_asg_min
   max_size            = var.backend_asg_max
-  vpc_zone_identifier = [data.aws_subnet.public.id, aws_subnet.public_c.id]
+  vpc_zone_identifier = [aws_subnet.private_a.id, aws_subnet.private_c.id]
   target_group_arns   = [aws_lb_target_group.backend.arn]
 
   health_check_type         = "ELB"
@@ -675,7 +739,7 @@ resource "aws_autoscaling_group" "frontend" {
   desired_capacity    = var.frontend_asg_desired
   min_size            = var.frontend_asg_min
   max_size            = var.frontend_asg_max
-  vpc_zone_identifier = [data.aws_subnet.public.id, aws_subnet.public_c.id]
+  vpc_zone_identifier = [aws_subnet.private_a.id, aws_subnet.private_c.id]
   target_group_arns   = [aws_lb_target_group.frontend.arn]
 
   health_check_type         = "ELB"
@@ -712,7 +776,7 @@ resource "aws_autoscaling_group" "ai" {
   desired_capacity    = var.ai_asg_desired
   min_size            = var.ai_asg_min
   max_size            = var.ai_asg_max
-  vpc_zone_identifier = [data.aws_subnet.public.id, aws_subnet.public_c.id]
+  vpc_zone_identifier = [aws_subnet.private_a.id, aws_subnet.private_c.id]
   target_group_arns   = [aws_lb_target_group.ai.arn]
 
   health_check_type         = "ELB"

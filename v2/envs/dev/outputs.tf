@@ -9,7 +9,12 @@ output "vpc_id" {
   value       = data.aws_vpc.existing.id
 }
 
-# Private Subnet IDs는 shared/rds/dev에서 관리
+output "private_subnet_ids" {
+  description = "Private Subnet IDs (EC2용)"
+  value       = [aws_subnet.private_a.id, aws_subnet.private_c.id]
+}
+
+# Private Subnet IDs (RDS용)는 shared/rds/dev에서 관리
 
 output "public_subnet_ids" {
   description = "Public Subnet IDs"
@@ -35,20 +40,13 @@ output "alb_arn" {
 }
 
 #==============================================================================
-# RDS (shared/rds/dev에서 참조)
+# RDS (shared/rds/dev에서 참조 - v2 전용 RDS)
 #==============================================================================
 output "rds_endpoint" {
   description = "RDS Endpoint"
   value       = data.aws_db_instance.main.endpoint
 }
 
-#==============================================================================
-# ElastiCache Redis (shared/elasticache/dev에서 참조)
-#==============================================================================
-output "redis_endpoint" {
-  description = "Redis Endpoint"
-  value       = data.aws_elasticache_cluster.main.cache_nodes[0].address
-}
 
 #==============================================================================
 # ASG (서비스별)
