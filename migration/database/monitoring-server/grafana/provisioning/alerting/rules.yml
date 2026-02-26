@@ -1,0 +1,164 @@
+# ==========================================
+# Grafana Alert Rules
+# DB 마이그레이션 모니터링용
+# ==========================================
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: migration-alerts
+    folder: Migration
+    interval: 10s
+    rules:
+      # MySQL 복제 지연 경고
+      - uid: mysql-replication-lag
+        title: MySQL Replication Lag
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: mysql_slave_status_seconds_behind_master{instance="mysql-rds"}
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [5]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              refId: C
+              type: classic_conditions
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: MySQL replication lag detected
+          description: Replication lag is above 5 seconds
+
+      # MySQL 복제 지연 위험
+      - uid: mysql-replication-lag-critical
+        title: MySQL Replication Lag Critical
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: mysql_slave_status_seconds_behind_master{instance="mysql-rds"}
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [30]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              refId: C
+              type: classic_conditions
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Critical MySQL replication lag
+          description: Replication lag is above 30 seconds
+
+      # API Synthetic Probe 실패
+      - uid: api-probe-failed
+        title: API Synthetic Probe Failed
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: probe_success{service="app-health"}
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              refId: C
+              type: classic_conditions
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: API synthetic probe failed
+          description: Blackbox probe cannot reach the endpoint
+
+      # RDS Exporter 다운 (Prometheus scrape 실패)
+      - uid: rds-exporter-down
+        title: RDS MySQL Exporter Down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: up{job="mysql-rds"}
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+              refId: C
+              type: classic_conditions
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: RDS MySQL exporter down
+          description: Prometheus cannot scrape mysqld_exporter for RDS

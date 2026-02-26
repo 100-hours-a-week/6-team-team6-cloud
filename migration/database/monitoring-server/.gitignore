@@ -1,0 +1,7 @@
+# 환경별 설정 (setup.sh로 생성)
+.env
+prometheus/targets/*.yml
+!prometheus/targets/templates/
+
+# Docker volumes
+*-data/

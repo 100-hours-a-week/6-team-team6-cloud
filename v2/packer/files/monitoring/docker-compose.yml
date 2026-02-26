@@ -1,0 +1,47 @@
+services:
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: always
+    ports:
+      - "9100:9100"
+    volumes:
+      - /:/host:ro,rslave
+    command:
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    network_mode: host
+    pid: host
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    restart: always
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    privileged: true
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    restart: always
+    volumes:
+      - /var/log/app:/var/log/app:ro
+      - /var/log:/var/log:ro
+      - ./promtail-config.yaml:/etc/promtail/config.yaml:ro
+    command:
+      - '-config.file=/etc/promtail/config.yaml'
+      - '-config.expand-env=true'
+    environment:
+      - APP_NAME=${APP_NAME:-unknown}
+    depends_on:
+      - node-exporter
