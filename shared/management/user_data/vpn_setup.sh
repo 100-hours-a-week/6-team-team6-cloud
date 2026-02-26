@@ -46,6 +46,9 @@ iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 # [FORWARD] VPC 내부 -> 인터넷 (NAT Instance 역할 - 트러블슈팅 1 핵심!)
 iptables -A FORWARD -i $PUB_IF -s 10.2.0.0/16 -o $PUB_IF -j ACCEPT
 
+# [FORWARD] Dev VPC -> 인터넷 (VPC Peering 경유 NAT - v2 Private Subnet용)
+iptables -A FORWARD -s 10.0.0.0/16 -o $PUB_IF -j ACCEPT
+
 # [FORWARD] 역할별 접근 제어 + 로깅 (Whitelist - 트러블슈팅 2 해결책)
 # DEVOPS: Full Access
 iptables -A FORWARD -s 10.100.0.16/28 -j LOG --log-prefix "[VPN-DEVOPS] " --log-level 4
@@ -69,6 +72,7 @@ iptables -A FORWARD -s 10.100.0.0/24 -j LOG --log-prefix "[VPN-DROP] " --log-lev
 # [NAT] Masquerade (VPC Peering 통신 해결 - 트러블슈팅 1, 2 핵심!)
 iptables -t nat -A POSTROUTING -s 10.100.0.0/24 -o $PUB_IF -j MASQUERADE
 iptables -t nat -A POSTROUTING -s 10.2.0.0/16 -o $PUB_IF -j MASQUERADE
+iptables -t nat -A POSTROUTING -s 10.0.0.0/16 -o $PUB_IF -j MASQUERADE
 
 netfilter-persistent save
 
