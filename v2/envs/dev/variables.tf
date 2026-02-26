@@ -57,9 +57,9 @@ variable "management_vpc_cidr" {
 }
 
 variable "vpn_cidr" {
-  description = "VPN CIDR (WireGuard)"
+  description = "VPN 트래픽 소스 CIDR (Masquerade 후 VPN 서버 IP로 도착)"
   type        = list(string)
-  default     = ["10.100.0.0/24"]
+  default     = ["10.2.0.0/16"] # Management VPC CIDR (VPN 서버가 Masquerade하므로)
 }
 
 #==============================================================================

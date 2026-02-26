@@ -211,7 +211,7 @@ resource "aws_security_group" "backend" {
   }
 
   ingress {
-    description = "SSH from VPN"
+    description = "SSH from VPN (Masquerade: Management VPC CIDR)"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -246,7 +246,7 @@ resource "aws_security_group" "frontend" {
   }
 
   ingress {
-    description = "SSH from VPN"
+    description = "SSH from VPN (Masquerade: Management VPC CIDR)"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -281,7 +281,7 @@ resource "aws_security_group" "ai" {
   }
 
   ingress {
-    description = "SSH from VPN"
+    description = "SSH from VPN (Masquerade: Management VPC CIDR)"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
