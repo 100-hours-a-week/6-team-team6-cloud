@@ -93,7 +93,7 @@ resource "aws_instance" "qdrant" {
   subnet_id                   = data.aws_subnet.public.id
   vpc_security_group_ids      = [aws_security_group.qdrant.id]
   key_name                    = var.key_name
-  associate_public_ip_address = true
+  associate_public_ip_address = var.associate_public_ip
 
   user_data = templatefile("${path.module}/user_data_qdrant.sh.tpl", {
     qdrant_container_image = var.qdrant_container_image
@@ -132,5 +132,6 @@ resource "aws_eip" "qdrant" {
 }
 
 locals {
-  qdrant_public_ip = var.create_eip ? aws_eip.qdrant[0].public_ip : aws_instance.qdrant.public_ip
+  qdrant_private_ip = aws_instance.qdrant.private_ip
+  qdrant_public_ip  = var.create_eip ? aws_eip.qdrant[0].public_ip : aws_instance.qdrant.public_ip
 }

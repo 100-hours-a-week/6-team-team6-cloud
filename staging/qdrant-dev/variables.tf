@@ -44,19 +44,25 @@ variable "root_volume_size" {
 variable "create_eip" {
   description = "Elastic IP 생성 여부"
   type        = bool
+  default     = false
+}
+
+variable "associate_public_ip" {
+  description = "퍼블릭 IP 자동 할당 여부 (NAT 미구성 시 Docker Hub pull을 위해 필요)"
+  type        = bool
   default     = true
 }
 
 variable "ssh_allowed_cidr" {
   description = "SSH 접근 허용 CIDR"
   type        = list(string)
-  default     = ["0.0.0.0/0"]
+  default     = ["10.2.0.0/16"]
 }
 
 variable "qdrant_allowed_cidr" {
   description = "Qdrant(6333, 6334) 접근 허용 CIDR"
   type        = list(string)
-  default     = ["0.0.0.0/0"]
+  default     = ["10.0.0.0/16"]
 }
 
 variable "qdrant_container_image" {

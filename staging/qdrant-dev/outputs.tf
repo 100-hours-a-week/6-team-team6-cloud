@@ -26,21 +26,21 @@ output "elastic_ip" {
 }
 
 output "qdrant_http_endpoint" {
-  description = "Qdrant HTTP Endpoint"
-  value       = "http://${local.qdrant_public_ip}:6333"
+  description = "Qdrant HTTP Endpoint (Private IP)"
+  value       = "http://${local.qdrant_private_ip}:6333"
 }
 
 output "qdrant_grpc_endpoint" {
-  description = "Qdrant gRPC Endpoint"
-  value       = "${local.qdrant_public_ip}:6334"
+  description = "Qdrant gRPC Endpoint (Private IP)"
+  value       = "${local.qdrant_private_ip}:6334"
 }
 
 output "healthcheck_command" {
-  description = "Qdrant 헬스체크 명령"
-  value       = "curl -H 'api-key: <QDRANT_API_KEY>' http://${local.qdrant_public_ip}:6333/healthz"
+  description = "Qdrant 헬스체크 명령 (Private IP)"
+  value       = "curl -H 'api-key: <QDRANT_API_KEY>' http://${local.qdrant_private_ip}:6333/healthz"
 }
 
 output "ssh_command" {
-  description = "Qdrant SSH 접속 명령"
-  value       = "ssh -i ~/.ssh/${var.key_name}.pem ubuntu@${local.qdrant_public_ip}"
+  description = "Qdrant SSH 접속 명령 (VPN 경유 Private IP)"
+  value       = "ssh -i ~/.ssh/${var.key_name}.pem ubuntu@${local.qdrant_private_ip}"
 }
