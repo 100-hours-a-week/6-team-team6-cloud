@@ -438,7 +438,7 @@ resource "aws_lb_target_group" "frontend" {
     timeout             = 5
     interval            = 30
     path                = "/"
-    matcher             = "200"
+    matcher             = "200-399"
   }
 
   tags = {
@@ -505,6 +505,7 @@ resource "aws_lb_listener" "https" {
   }
 }
 
+
 # Path based routing
 resource "aws_lb_listener_rule" "ws" {
   listener_arn = aws_lb_listener.https.arn
@@ -522,6 +523,7 @@ resource "aws_lb_listener_rule" "ws" {
   }
 }
 
+
 resource "aws_lb_listener_rule" "api" {
   listener_arn = aws_lb_listener.https.arn
   priority     = 100
@@ -532,8 +534,8 @@ resource "aws_lb_listener_rule" "api" {
   }
 
   condition {
-    path_pattern {
-      values = ["/api/*"]
+    host_header {
+      values = ["api-v2.${var.domain_name}"]
     }
   }
 }
@@ -913,3 +915,16 @@ resource "aws_route53_record" "v2" {
     evaluate_target_health = true
   }
 }
+
+resource "aws_route53_record" "api_v2" {
+  zone_id = data.aws_route53_zone.main.zone_id
+  name    = "api-v2.${var.domain_name}"
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.main.dns_name
+    zone_id                = aws_lb.main.zone_id
+    evaluate_target_health = true
+  }
+}
+

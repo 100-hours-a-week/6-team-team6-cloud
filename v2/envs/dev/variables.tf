@@ -176,5 +176,5 @@ variable "backend_health_check_path" {
 variable "ai_health_check_path" {
   description = "AI 서버 헬스체크 경로"
   type        = string
-  default     = "/health"
+  default     = "/ai/health"
 }
