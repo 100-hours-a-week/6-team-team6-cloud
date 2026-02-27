@@ -27,7 +27,7 @@ variable "instance_type" {
 variable "root_volume_size" {
   description = "RabbitMQ 루트 볼륨 크기(GB)"
   type        = number
-  default     = 20
+  default     = 30
 }
 
 variable "key_name" {
