@@ -1,4 +1,4 @@
-# staging/qdrant-dev/variables.tf
+# shared/vector-db/dev/variables.tf
 
 variable "aws_region" {
   description = "AWS Region"
