@@ -1,0 +1,7 @@
+# shared/rabbitmq/dev/terraform.tfvars.example
+
+instance_type = "t3.small"
+key_name      = "billage-keypair"
+
+# 운영 접근 CIDR (Management VPC + DevOps VPN 예시)
+management_access_cidrs = ["10.2.0.0/16", "10.100.0.16/28"]
