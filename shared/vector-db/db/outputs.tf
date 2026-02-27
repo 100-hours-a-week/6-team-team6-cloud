@@ -1,4 +1,4 @@
-# staging/qdrant-dev/outputs.tf
+# shared/vector-db/db/outputs.tf
 
 output "instance_id" {
   description = "Qdrant EC2 Instance ID"
