@@ -393,6 +393,7 @@ resource "aws_lb" "main" {
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = [data.aws_subnet.public.id, aws_subnet.public_c.id]
+  idle_timeout       = 300 # WebSocket 연결 안정성을 위해 기본(60s)보다 확장
 
   enable_deletion_protection = false
 
@@ -504,7 +505,25 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-# Host-header based routing (서브도메인)
+
+# Path based routing
+resource "aws_lb_listener_rule" "ws" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 90
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.backend.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/ws/*"]
+    }
+  }
+}
+
+
 resource "aws_lb_listener_rule" "api" {
   listener_arn = aws_lb_listener.https.arn
   priority     = 100
@@ -908,3 +927,4 @@ resource "aws_route53_record" "api_v2" {
     evaluate_target_health = true
   }
 }
+
