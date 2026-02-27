@@ -73,19 +73,15 @@ vim .env
 
 **수정 필요 항목:**
 ```bash
-# MySQL (systemd로 실행 중인 서비스 연결)
-MYSQL_HOST=localhost
-MYSQL_PORT=3306
-MYSQL_EXPORTER_USER=exporter         # MySQL 계정 생성 필요
+# MySQL Exporter 계정 비밀번호와 exporter.cnf를 동일하게 맞춰야 함
+MYSQL_EXPORTER_USER=exporter
 MYSQL_EXPORTER_PASSWORD=your_password
 
-# Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
-
-# MongoDB
-MONGO_HOST=localhost
-MONGO_PORT=27017
+# Nginx Exporter scrape URI
+# 기본: dev 환경 (/nginx_status)
+NGINX_SCRAPE_URI=http://127.0.0.1/nginx_status
+# prod 로컬 전용 status 포트 예시
+# NGINX_SCRAPE_URI=http://127.0.0.1:18080/nginx_status
 ```
 
 **MySQL Exporter 계정 생성:**
@@ -94,7 +90,9 @@ MONGO_PORT=27017
 mysql -u root -p < mysql/init_exporter.sql
 # 또는 수동:
 # CREATE USER 'exporter'@'localhost' IDENTIFIED BY 'password';
+# CREATE USER 'exporter'@'127.0.0.1' IDENTIFIED BY 'password';
 # GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO 'exporter'@'localhost';
+# GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO 'exporter'@'127.0.0.1';
 ```
 
 ```bash
@@ -135,6 +133,30 @@ docker ps
 curl localhost:9100/metrics  # Node Exporter
 curl localhost:8082/metrics  # cAdvisor
 curl localhost:9104/metrics  # MySQL Exporter
+curl localhost:9113/metrics  # Nginx Exporter
+curl localhost:9104/metrics | grep '^mysql_up'   # mysql_up 1 확인
+curl localhost:9113/metrics | grep '^nginx_up'   # nginx_up 1 확인
+```
+
+### Prod에서 로컬 전용 Nginx status 엔드포인트를 쓰는 경우
+```nginx
+# /etc/nginx/conf.d/monitoring-status.conf
+server {
+    listen 127.0.0.1:18080;
+    server_name localhost;
+
+    location = /nginx_status {
+        stub_status on;
+        access_log off;
+        allow 127.0.0.1;
+        deny all;
+    }
+}
+```
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx   # restart 금지 (무중단)
 ```
 
 ## 포트 목록
@@ -148,6 +170,7 @@ curl localhost:9104/metrics  # MySQL Exporter
 - `9100`: Node Exporter (시스템 메트릭)
 - `8082`: cAdvisor (컨테이너 메트릭)
 - `9104`: MySQL Exporter
+- `9113`: Nginx Exporter
 
 ## 보안 그룹 설정
 
@@ -156,7 +179,7 @@ curl localhost:9104/metrics  # MySQL Exporter
 - Outbound: All (EC2 Service Discovery용)
 
 ### 타겟 서버
-- Inbound: 9100, 8082, 9104 - 모니터링 서버 IP만 허용
+- Inbound: 9100, 8082, 9104, 9113 - 모니터링 서버 IP만 허용
 
 ## 문제 해결
 
@@ -172,5 +195,14 @@ curl localhost:9104/metrics  # MySQL Exporter
 
 ### MySQL Exporter 연결 실패
 1. MySQL exporter 계정 생성 확인
-2. `MYSQL_HOST`가 `localhost`인지 확인 (systemd 서비스)
-3. MySQL 포트 확인 (`MYSQL_PORT`)
+2. `mysql/exporter.cnf`의 `host`가 `127.0.0.1`인지 확인
+3. 계정 권한과 비밀번호 일치 확인 (`Access denied` 여부)
+
+### Nginx Exporter 연결 실패
+1. 타겟 서버에서 `curl localhost:9113/metrics` 확인 (`nginx_up 1`)
+2. `NGINX_SCRAPE_URI`가 실제 status 엔드포인트와 일치하는지 확인
+3. 보안 그룹에 `9113/tcp` 인바운드 허용 여부 확인
+
+### Grafana dev/prod 분리 보기
+1. `Billage App Observability` 대시보드 열기
+2. 상단 `Environment` 변수에서 `dev`, `prod`, `All` 선택
