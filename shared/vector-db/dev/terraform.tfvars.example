@@ -1,4 +1,4 @@
-# shared/vector-db/db/terraform.tfvars.example
+# shared/vector-db/dev/terraform.tfvars.example
 # 실제 배포 시 복사해서 terraform.tfvars로 사용
 
 aws_region   = "ap-northeast-2"

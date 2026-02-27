@@ -1,4 +1,4 @@
-# shared/vector-db/db/main.tf
+# shared/vector-db/dev/main.tf
 # Dev 전용 외부 Qdrant 서버
 
 terraform {

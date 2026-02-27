@@ -1,5 +1,5 @@
 #!/bin/bash
-# shared/vector-db/db/user_data_qdrant.sh.tpl
+# staging/qdrant-dev/user_data_qdrant.sh.tpl
 
 set -euo pipefail
 
