@@ -5,16 +5,15 @@
 # 운영 환경 단일 인스턴스 구성
 
 #==============================================================================
-# VPC 모듈
+# VPC - shared/network/prod에서 관리 (이 모듈에서 제거됨)
 #==============================================================================
-module "vpc" {
-  source = "../../../modules/vpc"
-
-  project_name       = var.project_name
-  env                = var.env
-  vpc_cidr           = var.vpc_cidr
-  public_subnet_cidr = var.public_subnet_cidr
-  availability_zone  = var.availability_zone
+data "terraform_remote_state" "network" {
+  backend = "s3"
+  config = {
+    bucket = "billage-terraform-state-prod"
+    key    = "shared/network/prod/terraform.tfstate"
+    region = "ap-northeast-2"
+  }
 }
 
 #==============================================================================
@@ -25,7 +24,7 @@ module "security_group" {
 
   project_name           = var.project_name
   env                    = var.env
-  vpc_id                 = module.vpc.vpc_id
+  vpc_id                 = data.terraform_remote_state.network.outputs.vpc_id
   vpc_cidr               = var.vpc_cidr
   ssh_allowed_cidr       = var.ssh_allowed_cidr
   db_allowed_cidr        = var.db_allowed_cidr
@@ -50,7 +49,7 @@ module "ec2_main" {
   instance_name      = "main-server"
   instance_role      = "monitoring-target"
   instance_type      = var.instance_type
-  subnet_id          = module.vpc.public_subnet_id
+  subnet_id          = data.terraform_remote_state.network.outputs.public_subnet_id
   security_group_ids = [
     module.security_group.main_sg_id,
     module.security_group.monitoring_target_sg_id
