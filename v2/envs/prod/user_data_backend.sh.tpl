@@ -1,5 +1,5 @@
 #!/bin/bash
-# v2/envs/dev/user_data_backend.sh.tpl
+# v2/envs/prod/user_data_backend.sh.tpl
 # Backend EC2 인스턴스 시작 시 실행되는 스크립트
 
 set -e

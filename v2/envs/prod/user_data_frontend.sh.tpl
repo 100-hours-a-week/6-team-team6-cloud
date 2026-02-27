@@ -1,21 +1,21 @@
 #!/bin/bash
-# v2/envs/dev/user_data_backend.sh.tpl
-# Backend EC2 인스턴스 시작 시 실행되는 스크립트
+# v2/envs/prod/user_data_frontend.sh.tpl
+# Frontend EC2 인스턴스 시작 시 실행되는 스크립트
 
 set -e
 
 # 로그 설정
 exec > >(tee /var/log/user-data.log) 2>&1
-echo "=== Backend User Data Script Started at $(date) ==="
+echo "=== Frontend User Data Script Started at $(date) ==="
 
 # 부트스트랩 변수 (Terraform에서 주입 - 인프라 정보만)
 ENV="${env}"
 PROJECT_NAME="${project_name}"
 AWS_REGION="${aws_region}"
 ECR_REGISTRY="${ecr_registry}"
-SERVICE="be"
-CONTAINER_NAME="billage-backend"
-CONTAINER_PORT=8080
+SERVICE="fe"
+CONTAINER_NAME="billage-frontend"
+CONTAINER_PORT=3000
 IMAGE="$ECR_REGISTRY/$PROJECT_NAME-$SERVICE:$ENV-latest"
 
 echo "Environment: $ENV"
@@ -58,4 +58,4 @@ eval docker run -d \
 echo "=== Container Status ==="
 docker ps
 
-echo "=== Backend User Data Script Completed at $(date) ==="
+echo "=== Frontend User Data Script Completed at $(date) ==="
