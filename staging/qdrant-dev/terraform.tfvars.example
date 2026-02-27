@@ -1,0 +1,26 @@
+# staging/qdrant-dev/terraform.tfvars.example
+# 실제 배포 시 복사해서 terraform.tfvars로 사용
+
+aws_region   = "ap-northeast-2"
+project_name = "billage"
+env          = "dev"
+
+# v2/packer/manifest.json 기준 Golden AMI 예시
+# 최신 값으로 교체 권장
+
+golden_ami_id = "ami-01488502d83cfffa4"
+
+# 4GB RAM
+instance_type = "t3.medium"
+
+key_name         = "billage-keypair"
+root_volume_size = 20
+create_eip       = false
+associate_public_ip = true
+
+# VPN + 내부 통신 기준
+ssh_allowed_cidr    = ["10.2.0.0/16"]
+qdrant_allowed_cidr = ["10.0.0.0/16"]
+
+qdrant_container_image = "qdrant/qdrant:latest"
+qdrant_api_key         = "replace-with-dev-qdrant-api-key"
