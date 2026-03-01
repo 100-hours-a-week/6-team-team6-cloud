@@ -95,19 +95,19 @@ variable "backend_instance_type" {
 variable "backend_asg_desired" {
   description = "Backend ASG 희망 인스턴스 수"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "backend_asg_min" {
   description = "Backend ASG 최소 인스턴스 수"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "backend_asg_max" {
   description = "Backend ASG 최대 인스턴스 수"
   type        = number
-  default     = 1
+  default     = 4
 }
 
 #==============================================================================
@@ -122,19 +122,19 @@ variable "frontend_instance_type" {
 variable "frontend_asg_desired" {
   description = "Frontend ASG 희망 인스턴스 수"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "frontend_asg_min" {
   description = "Frontend ASG 최소 인스턴스 수"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "frontend_asg_max" {
   description = "Frontend ASG 최대 인스턴스 수"
   type        = number
-  default     = 1
+  default     = 4
 }
 
 #==============================================================================
@@ -149,19 +149,19 @@ variable "ai_instance_type" {
 variable "ai_asg_desired" {
   description = "AI ASG 희망 인스턴스 수"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "ai_asg_min" {
   description = "AI ASG 최소 인스턴스 수"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "ai_asg_max" {
   description = "AI ASG 최대 인스턴스 수"
   type        = number
-  default     = 1
+  default     = 4
 }
 
 #==============================================================================
@@ -176,5 +176,5 @@ variable "backend_health_check_path" {
 variable "ai_health_check_path" {
   description = "AI 서버 헬스체크 경로"
   type        = string
-  default     = "/health"
+  default     = "/ai/health"
 }

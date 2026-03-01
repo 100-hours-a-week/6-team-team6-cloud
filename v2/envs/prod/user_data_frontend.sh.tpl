@@ -22,9 +22,9 @@ echo "Environment: $ENV"
 echo "Service: $SERVICE"
 echo "ECR Registry: $ECR_REGISTRY"
 
-# ECR 로그인
-echo "=== ECR Login ==="
-aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+# ECR 인증: Golden AMI에 docker-credential-ecr-login이 설치되어 있어
+# credsStore=ecr-login 설정으로 IAM Role 기반 자동 인증 (docker login 불필요)
+echo "=== ECR Auth: using credential helper (ecr-login) ==="
 
 # SSM Parameter Store에서 환경변수 일괄 조회
 echo "=== Fetching SSM Parameters ==="

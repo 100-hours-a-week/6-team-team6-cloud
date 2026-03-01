@@ -81,11 +81,65 @@
 
 ---
 
-## Phase 1: DB 마이그레이션 (MySQL → RDS)
+## Phase 1: 팀 공지 & v1 서비스 중단
 
-> Dev 환경이므로 짧은 중단 허용. Replica 방식 또는 mysqldump 직접 이관 중 선택.
+> v1 서비스를 먼저 정지해야 DB dump 이후 새로운 쓰기가 발생하지 않는다.
+> 순서: 공지 → Nginx 점검 모드 → 애플리케이션 정지 → DB 이관
 
-### Option A: mysqldump 직접 이관 (간단, 중단 시간 수 분)
+### 1-1. 팀 공지
+
+- [ ] Slack/Discord 공지 (예시)
+  ```
+  @channel [Dev 환경 점검 안내]
+  - 일시: YYYY-MM-DD HH:MM ~ HH:MM (약 30분)
+  - 내용: dev.billages.com v2 인프라로 전환
+  - 영향: Dev 환경 일시 접속 불가
+  - 완료 후 재공지 예정
+  ```
+
+### 1-2. v1 Nginx 점검 모드 전환
+
+> Nginx는 정지하지 않고 점검 페이지를 반환하도록 전환한다.
+> DNS 전파 완료 전까지 v1으로 접속하는 유저에게 "점검 중" 메시지를 보여준다.
+
+- [ ] 점검 페이지 배치 및 Nginx 설정 교체
+  ```bash
+  # v1 EC2 SSH
+  ./maintenance-on.sh
+  # 스크립트가 없으면 Prod 체크리스트 부록 A 참고하여 생성
+  ```
+- [ ] 점검 모드 확인
+  ```bash
+  curl -I https://dev.billages.com
+  # HTTP/1.1 503 Service Temporarily Unavailable 반환 확인
+  ```
+
+### 1-3. v1 애플리케이션 정지
+
+> Nginx는 점검 페이지를 계속 서빙하므로 정지하지 않는다.
+
+- [ ] v1 Backend 정지
+  ```bash
+  sudo systemctl stop billage-backend
+  ```
+- [ ] v1 Frontend 정지
+  ```bash
+  sudo systemctl stop billage-frontend
+  ```
+- [ ] v1 AI 정지
+  ```bash
+  sudo systemctl stop billage-ai
+  ```
+- [ ] **⚠️ v1 Nginx는 정지하지 않음** (DNS 전파 완료 후 Phase 3-2에서 정지)
+
+---
+
+## Phase 2: DB 마이그레이션 (MySQL → RDS)
+
+> v1 서비스가 정지된 상태이므로 새로운 쓰기가 없다.
+> dump 시점의 데이터가 최종 데이터임이 보장된다.
+
+### Option A: mysqldump 직접 이관 (권장, 간단)
 
 - [ ] v1 EC2 SSH 접속
 - [ ] mysqldump 실행
@@ -116,50 +170,16 @@
   " billage
   ```
 
-### Option B: Replica 기반 무중단 전환 (리허설 완료된 방식)
+### Option B: Replica 기반 전환 (리허설 완료된 방식)
 
+> Replica 방식은 v1 서비스 정지 전에 사전 동기화를 수행할 수 있어 중단 시간을 더 줄일 수 있다.
 > 상세 절차는 [db-migration-runbook.md](../migration/db-migration-runbook.md) 및 [cutover-runbook.md](../migration/08-cutover-runbook.md) 참고
 
 - [ ] Host MySQL GTID 설정 확인
 - [ ] mysqldump + GTID 기준점 확보
 - [ ] RDS를 Host MySQL의 external replica로 설정
 - [ ] `Seconds_Behind_Source=0` 도달 확인
-- [ ] Write Freeze → 트래픽 전환 → Replication 정리
-
----
-
-## Phase 2: 팀 공지 & v1 서비스 중단
-
-### 2-1. 팀 공지
-
-- [ ] Slack/Discord 공지 (예시)
-  ```
-  @channel [Dev 환경 점검 안내]
-  - 일시: YYYY-MM-DD HH:MM ~ HH:MM (약 30분)
-  - 내용: dev.billages.com v2 인프라로 전환
-  - 영향: Dev 환경 일시 접속 불가
-  - 완료 후 재공지 예정
-  ```
-
-### 2-2. v1 서비스 정지 (DB 이관 이후)
-
-- [ ] v1 Backend 정지
-  ```bash
-  # v1 EC2 SSH
-  sudo systemctl stop billage-backend
-  ```
-- [ ] v1 Frontend 정지
-  ```bash
-  sudo systemctl stop billage-frontend
-  ```
-- [ ] v1 AI 정지
-  ```bash
-  sudo systemctl stop billage-ai
-  ```
-- [ ] Nginx 정지 (선택 - 유지보수 페이지 표시 가능)
-  ```bash
-  sudo systemctl stop nginx
-  ```
+- [ ] Write Freeze → Replication 정리
 
 ---
 
@@ -199,7 +219,20 @@
   ```
 - [ ] v2.dev.billages.com 레코드는 유지 (테스트용)
 
-### 3-2. Frontend SSM 파라미터 업데이트 (필요 시)
+### 3-2. v1 Nginx 최종 정지
+
+> DNS 전파가 완료되어 v1으로의 트래픽이 거의 없어진 후 정지한다.
+
+- [ ] DNS 전파 확인 (ALB DNS가 반환되는지)
+  ```bash
+  dig dev.billages.com +short
+  ```
+- [ ] v1 Nginx 정지
+  ```bash
+  sudo systemctl stop nginx
+  ```
+
+### 3-3. Frontend SSM 파라미터 업데이트 (필요 시)
 
 > v2 Frontend의 `NEXT_PUBLIC_API_URL` 등이 `v2.dev.billages.com`으로 되어 있다면 `dev.billages.com`으로 변경 필요
 
@@ -313,8 +346,8 @@
 | 단계 | 예상 시간 | 비고 |
 |------|----------|------|
 | Phase 0: 사전 점검 | 30분 | D-1에 미리 수행 |
-| Phase 1: DB 이관 (Option A) | 10~30분 | 데이터 크기에 따라 |
-| Phase 2: 팀 공지 + v1 중단 | 5분 | |
+| Phase 1: 팀 공지 + v1 중단 | 5분 | Nginx 점검 모드 + 앱 정지 |
+| Phase 2: DB 이관 (Option A) | 10~30분 | 서비스 정지 상태에서 깨끗한 dump |
 | Phase 3: DNS 스위칭 | 5~10분 | TTL 전파 대기 |
 | Phase 4: 검증 | 15~20분 | |
 | **총 중단 시간** | **약 30~60분** | Dev 환경이므로 허용 가능 |
