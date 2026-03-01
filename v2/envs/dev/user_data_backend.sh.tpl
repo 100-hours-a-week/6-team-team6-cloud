@@ -16,7 +16,7 @@ ECR_REGISTRY="${ecr_registry}"
 SERVICE="be"
 CONTAINER_NAME="billage-backend"
 CONTAINER_PORT=8080
-IMAGE="$ECR_REGISTRY/$PROJECT_NAME-$SERVICE:$ENV-latest"
+IMAGE="$ECR_REGISTRY/$PROJECT_NAME-$SERVICE:latest"
 
 echo "Environment: $ENV"
 echo "Service: $SERVICE"

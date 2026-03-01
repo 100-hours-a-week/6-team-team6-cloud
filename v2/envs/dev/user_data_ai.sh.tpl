@@ -16,7 +16,7 @@ ECR_REGISTRY="${ecr_registry}"
 SERVICE="ai"
 CONTAINER_NAME="billage-ai"
 CONTAINER_PORT=5000
-IMAGE="$ECR_REGISTRY/$PROJECT_NAME-$SERVICE:$ENV-latest"
+IMAGE="$ECR_REGISTRY/$PROJECT_NAME-$SERVICE:latest"
 
 echo "Environment: $ENV"
 echo "Service: $SERVICE"
