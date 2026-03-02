@@ -91,7 +91,7 @@ resource "aws_security_group" "alb" {
   vpc_id      = data.aws_vpc.base.id
 
   ingress {
-    description = "HTTP for redirect(80 -> 8081)"
+    description = "HTTP for redirect 80 to 8081"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
@@ -268,7 +268,7 @@ resource "aws_lb" "rehearsal" {
 }
 
 resource "aws_lb_target_group" "backend" {
-  name        = "${var.project_name}-${var.env}-rehearsal-be-tg"
+  name        = "${var.project_name}-${var.env}-be-tg"
   port        = var.backend_container_port
   protocol    = "HTTP"
   vpc_id      = data.aws_vpc.base.id
