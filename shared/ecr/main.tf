@@ -62,7 +62,7 @@ resource "aws_ecr_lifecycle_policy" "cleanup" {
         description  = "Keep last 10 tagged images"
         selection = {
           tagStatus     = "tagged"
-          tagPrefixList = ["v", "release", "main", "dev", "develop"]
+          tagPrefixList = ["v", "release", "main", "dev", "develop", "prod"]
           countType     = "imageCountMoreThan"
           countNumber   = 10
         }

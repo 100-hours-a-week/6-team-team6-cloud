@@ -6,17 +6,17 @@
 #==============================================================================
 output "vpc_id" {
   description = "VPC ID"
-  value       = module.vpc.vpc_id
+  value       = data.terraform_remote_state.network.outputs.vpc_id
 }
 
 output "vpc_cidr" {
   description = "VPC CIDR"
-  value       = module.vpc.vpc_cidr
+  value       = data.terraform_remote_state.network.outputs.vpc_cidr
 }
 
 output "public_subnet_id" {
   description = "Public Subnet ID"
-  value       = module.vpc.public_subnet_id
+  value       = data.terraform_remote_state.network.outputs.public_subnet_id
 }
 
 #==============================================================================
