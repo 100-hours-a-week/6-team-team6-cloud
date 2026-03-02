@@ -107,7 +107,7 @@ variable "backend_asg_min" {
 variable "backend_asg_max" {
   description = "Backend ASG 최대 인스턴스 수"
   type        = number
-  default     = 1 # Dev: 스케일아웃 비활성화
+  default     = 2 # Dev: 무중단 배포를 위해 max=2 (평소 1대, 배포 시 일시적 2대)
 }
 
 #==============================================================================
@@ -134,7 +134,7 @@ variable "frontend_asg_min" {
 variable "frontend_asg_max" {
   description = "Frontend ASG 최대 인스턴스 수"
   type        = number
-  default     = 1 # Dev: 스케일아웃 비활성화
+  default     = 2 # Dev: 무중단 배포를 위해 max=2 (평소 1대, 배포 시 일시적 2대)
 }
 
 #==============================================================================
@@ -161,7 +161,7 @@ variable "ai_asg_min" {
 variable "ai_asg_max" {
   description = "AI ASG 최대 인스턴스 수"
   type        = number
-  default     = 1 # Dev: 스케일아웃 비활성화
+  default     = 2 # Dev: 무중단 배포를 위해 max=2 (평소 1대, 배포 시 일시적 2대)
 }
 
 #==============================================================================

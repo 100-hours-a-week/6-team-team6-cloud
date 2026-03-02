@@ -810,7 +810,7 @@ resource "aws_autoscaling_group" "backend" {
   instance_refresh {
     strategy = "Rolling"
     preferences {
-      min_healthy_percentage = 0 # Dev: 1대라서 0으로 설정
+      min_healthy_percentage = 100 # 무중단 배포: 새 인스턴스 healthy 확인 후 기존 종료
     }
   }
 
@@ -847,7 +847,7 @@ resource "aws_autoscaling_group" "frontend" {
   instance_refresh {
     strategy = "Rolling"
     preferences {
-      min_healthy_percentage = 0 # Dev: 1대라서 0으로 설정
+      min_healthy_percentage = 100 # 무중단 배포: 새 인스턴스 healthy 확인 후 기존 종료
     }
   }
 
@@ -884,7 +884,7 @@ resource "aws_autoscaling_group" "ai" {
   instance_refresh {
     strategy = "Rolling"
     preferences {
-      min_healthy_percentage = 0 # Dev: 1대라서 0으로 설정
+      min_healthy_percentage = 100 # 무중단 배포: 새 인스턴스 healthy 확인 후 기존 종료
     }
   }
 
