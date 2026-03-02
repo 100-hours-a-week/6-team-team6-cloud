@@ -84,7 +84,7 @@ variable "app_root_volume_size" {
 variable "backend_instance_type" {
   description = "Backend 인스턴스 타입"
   type        = string
-  default     = "t3.small"
+  default     = "t2.micro"
 }
 
 variable "backend_asg_desired" {
@@ -129,10 +129,16 @@ variable "backend_container_port" {
   default     = 8080
 }
 
+variable "backend_spring_profile" {
+  description = "Spring profile for rehearsal BE runtime"
+  type        = string
+  default     = "dev"
+}
+
 variable "ssm_backend_path" {
   description = "Backend 컨테이너 환경변수 SSM path"
   type        = string
-  default     = "/billage/rehearsal/be/"
+  default     = "/billage/dev/be/"
 }
 
 #==============================================================================

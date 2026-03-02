@@ -358,6 +358,7 @@ resource "aws_launch_template" "backend" {
     db_host      = aws_db_instance.main.address
     db_port      = aws_db_instance.main.port
     db_name      = aws_db_instance.main.db_name
+    app_profile  = var.backend_spring_profile
     container_image = var.backend_container_image
     container_port  = var.backend_container_port
     service_name    = var.backend_service_name

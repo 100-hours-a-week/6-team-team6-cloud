@@ -16,15 +16,16 @@ ssh_allowed_cidr = ["0.0.0.0/0"]
 golden_ami_id = "ami-xxxxxxxxxxxxxxxxx"
 
 key_name                = "billage-keypair"
-backend_instance_type    = "t3.small"
+backend_instance_type    = "t2.micro"
 backend_asg_desired      = 1
 backend_asg_min          = 1
 backend_asg_max          = 1
 backend_health_check_path = "/actuator/health"
 backend_service_name     = "be"
 backend_container_port   = 8080
-backend_container_image  = "" # 비워두면 "${project_name}-be:${env}-latest"
-ssm_backend_path        = "/billage/rehearsal/be/"
+backend_container_image  = "" # 비워두면 "${project_name}-be:latest" 사용
+backend_spring_profile  = "dev"
+ssm_backend_path        = "/billage/dev/be/"
 
 rds_identifier             = "billage-rehearsal-mysql"
 rds_engine_version         = "8.0"
