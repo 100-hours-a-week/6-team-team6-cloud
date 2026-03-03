@@ -1,0 +1,42 @@
+# rehearsal/infra/terraform.tfvars.example
+aws_region   = "ap-northeast-2"
+project_name = "billage"
+env          = "rehearsal"
+base_vpc_env = "dev"
+domain_name  = "billages.com"
+
+create_dns_record = true
+dns_record_name   = "rehearsal-api"
+
+public_subnet_b_cidr = "10.0.3.0/24"
+public_subnet_b_az    = "c"
+ssh_allowed_cidr = ["0.0.0.0/0"]
+
+# 실제 환경에서 사용하는 골든 AMI ID로 치환
+golden_ami_id = "ami-xxxxxxxxxxxxxxxxx"
+
+key_name                = "billage-keypair"
+backend_instance_type    = "t2.micro"
+backend_asg_desired      = 1
+backend_asg_min          = 1
+backend_asg_max          = 1
+backend_health_check_path = "/actuator/health"
+backend_service_name     = "be"
+backend_container_port   = 8080
+backend_container_image  = "" # 비워두면 "${project_name}-be:latest" 사용
+backend_spring_profile  = "dev"
+ssm_backend_path        = "/billage/dev/be/"
+
+rds_identifier             = "billage-rehearsal-mysql"
+rds_engine_version         = "8.0"
+rds_instance_class         = "db.t4g.micro"
+rds_allocated_storage      = 20
+rds_max_allocated_storage  = 100
+rds_multi_az               = false
+rds_publicly_accessible    = false
+rds_db_name               = "billage"
+rds_username              = "billage_admin"
+rds_password              = "REPLACE_ME"
+rds_deletion_protection   = false
+rds_skip_final_snapshot    = true
+rds_backup_retention_days = 7
