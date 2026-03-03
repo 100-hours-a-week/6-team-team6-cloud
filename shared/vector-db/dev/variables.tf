@@ -65,6 +65,12 @@ variable "qdrant_allowed_cidr" {
   default     = ["10.0.0.0/16"]
 }
 
+variable "qdrant_allowed_security_group_ids" {
+  description = "Qdrant(6333, 6334) 접근 허용 Security Group ID 목록 (선택)"
+  type        = list(string)
+  default     = []
+}
+
 variable "qdrant_container_image" {
   description = "Qdrant Docker 이미지"
   type        = string

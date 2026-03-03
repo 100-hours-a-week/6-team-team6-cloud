@@ -19,8 +19,10 @@ create_eip       = false
 associate_public_ip = true
 
 # VPN + 내부 통신 기준
-ssh_allowed_cidr    = ["10.2.0.0/16"]
-qdrant_allowed_cidr = ["10.0.0.0/16"]
+ssh_allowed_cidr                  = ["10.2.0.0/16"]
+# Qdrant는 CIDR보다 AI SG 허용이 권장되므로, 운영에서는 아래를 비워두고 qdrant_allowed_security_group_ids를 사용 권장
+qdrant_allowed_cidr               = ["10.0.0.0/16"]
+qdrant_allowed_security_group_ids = []
 
 qdrant_container_image = "qdrant/qdrant:latest"
 qdrant_api_key         = "replace-with-dev-qdrant-api-key"

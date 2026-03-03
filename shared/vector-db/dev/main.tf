@@ -64,12 +64,34 @@ resource "aws_security_group" "qdrant" {
     cidr_blocks = var.qdrant_allowed_cidr
   }
 
+  dynamic "ingress" {
+    for_each = length(var.qdrant_allowed_security_group_ids) > 0 ? [1] : []
+    content {
+      description     = "Qdrant HTTP from AI ASG SG"
+      from_port       = 6333
+      to_port         = 6333
+      protocol        = "tcp"
+      security_groups = var.qdrant_allowed_security_group_ids
+    }
+  }
+
   ingress {
     description = "Qdrant gRPC"
     from_port   = 6334
     to_port     = 6334
     protocol    = "tcp"
     cidr_blocks = var.qdrant_allowed_cidr
+  }
+
+  dynamic "ingress" {
+    for_each = length(var.qdrant_allowed_security_group_ids) > 0 ? [1] : []
+    content {
+      description     = "Qdrant gRPC from AI ASG SG"
+      from_port       = 6334
+      to_port         = 6334
+      protocol        = "tcp"
+      security_groups = var.qdrant_allowed_security_group_ids
+    }
   }
 
   egress {
