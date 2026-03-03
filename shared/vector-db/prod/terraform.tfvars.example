@@ -20,7 +20,7 @@ associate_public_ip = true
 
 # VPN + VPC 내부 통신 기준
 ssh_allowed_cidr    = ["10.2.0.0/16"]
-qdrant_allowed_cidr = ["10.1.0.0/16"]
+qdrant_allowed_cidr = ["10.1.0.0/16", "10.2.0.0/16"]
 
 qdrant_container_image = "qdrant/qdrant:latest"
 qdrant_api_key         = "replace-with-prod-qdrant-api-key"

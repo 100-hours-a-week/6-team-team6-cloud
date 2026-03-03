@@ -62,7 +62,10 @@ variable "ssh_allowed_cidr" {
 variable "qdrant_allowed_cidr" {
   description = "Qdrant(6333, 6334) 접근 허용 CIDR"
   type        = list(string)
-  default     = ["10.1.0.0/16"]
+  default = [
+    "10.1.0.0/16",
+    "10.2.0.0/16"
+  ]
 }
 
 variable "qdrant_container_image" {
