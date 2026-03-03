@@ -1,6 +1,7 @@
 # v2 마이그레이션 체크리스트 (Dev 환경)
 
 > 작성일: 2026-02-27
+> **실행일: 2026-03-01**
 > 대상: v1 (단일 EC2) → v2 (ALB + ASG + RDS)
 > 도메인: `dev.billages.com`
 > 참고: [migration overview](../migration/00-migration-overview.md) | [db-migration](../migration/01-db-migration.md) | [cutover-runbook](../migration/08-cutover-runbook.md)
@@ -21,26 +22,26 @@
 
 ### 0-1. v2 인프라 상태 확인
 
-- [ ] ALB 헬스체크 정상 (3개 Target Group 모두 healthy)
+- [x] ALB 헬스체크 정상 (BE/FE healthy, AI unhealthy — 별도 이슈)
   ```bash
   aws elbv2 describe-target-health --target-group-arn <be-tg-arn>
   aws elbv2 describe-target-health --target-group-arn <fe-tg-arn>
   aws elbv2 describe-target-health --target-group-arn <ai-tg-arn>
   ```
-- [ ] ASG 인스턴스 상태 확인 (BE/FE/AI 각 1대 InService)
+- [x] ASG 인스턴스 상태 확인 (BE/FE 각 1대 InService)
   ```bash
   aws autoscaling describe-auto-scaling-groups \
     --auto-scaling-group-names billage-dev-v2-be-asg billage-dev-v2-fe-asg billage-dev-v2-ai-asg \
     --query 'AutoScalingGroups[].{Name:AutoScalingGroupName,Desired:DesiredCapacity,Instances:Instances[].{Id:InstanceId,Health:HealthStatus,State:LifecycleState}}'
   ```
-- [ ] RDS 상태 `available` 확인
+- [x] RDS 상태 `available` 확인 (MySQL 8.0.44)
   ```bash
   aws rds describe-db-instances --db-instance-identifier billage-dev-v2-mysql \
     --query 'DBInstances[0].{Status:DBInstanceStatus,Endpoint:Endpoint.Address}'
   ```
-- [ ] v2.dev.billages.com 접속 → 기본 페이지 로딩 확인
-- [ ] v2 Backend 헬스체크: `curl https://v2.dev.billages.com/api/actuator/health`
-- [ ] v2 AI 헬스체크: `curl https://v2.dev.billages.com/ai/health`
+- [x] v2.dev.billages.com 접속 → 기본 페이지 로딩 확인
+- [x] v2 Backend 헬스체크: `api-v2.billages.com/actuator/health` → `{"status":"UP"}`
+- [ ] ~~v2 AI 헬스체크~~ — AI TG unhealthy (별도 확인 필요)
 
 ### 0-2. SSM 파라미터 확인
 
@@ -62,22 +63,15 @@
 
 ### 0-3. 현재 v1 상태 기록
 
-- [ ] v1 EC2 Elastic IP 기록: `_______________`
-- [ ] Route 53 현재 레코드 확인 (dev.billages.com → EIP)
-  ```bash
-  aws route53 list-resource-record-sets --hosted-zone-id <zone-id> \
-    --query "ResourceRecordSets[?Name=='dev.billages.com.']"
-  ```
-- [ ] v1 MySQL 데이터 건수 스냅샷 (주요 테이블 row count 기록)
-  ```bash
-  # v1 EC2에 SSH 후
-  mysql -u billage_user -p -e "
-    SELECT 'users' AS tbl, COUNT(*) AS cnt FROM users
-    UNION ALL SELECT 'post', COUNT(*) FROM post
-    UNION ALL SELECT 'chatroom', COUNT(*) FROM chatroom
-    UNION ALL SELECT 'chat_message', COUNT(*) FROM chat_message;
-  " billage
-  ```
+- [x] v1 EC2 Elastic IP 기록: `43.200.94.221` (i-094a7254ce5407eaa, t4g.medium)
+- [x] Route 53 현재 레코드 확인: `dev.billages.com` → `43.200.94.221` (A, TTL 300)
+- [x] v1 MySQL 데이터 건수 스냅샷:
+  | 테이블 | 건수 |
+  |--------|------|
+  | users | 59 |
+  | post | 74 |
+  | chatroom | 35 |
+  | chat_message | 2,066 |
 
 ---
 
@@ -139,36 +133,30 @@
 > v1 서비스가 정지된 상태이므로 새로운 쓰기가 없다.
 > dump 시점의 데이터가 최종 데이터임이 보장된다.
 
-### Option A: mysqldump 직접 이관 (권장, 간단)
+### Option A: mysqldump 직접 이관 (권장, 간단) — ✅ 완료 (2026-03-01)
 
-- [ ] v1 EC2 SSH 접속
-- [ ] mysqldump 실행
+- [x] v1 EC2 SSH 접속 (`ssh -i ~/.ssh/billage-keypair.pem ubuntu@43.200.94.221`)
+- [x] mysqldump 실행 → `/tmp/billage-dev-20260301.sql.gz` (44KB)
   ```bash
-  mysqldump -u billage_user -p \
-    --single-transaction \
+  sudo mysqldump --single-transaction \
     --routines --triggers --events \
     --set-gtid-purged=OFF \
-    billage | gzip > /tmp/billage-dev-$(date +%Y%m%d).sql.gz
+    billage | gzip > /tmp/billage-dev-20260301.sql.gz
   ```
-- [ ] 덤프 파일을 RDS 접근 가능한 위치로 복사 (v2 Backend 인스턴스 또는 bastion)
+- [x] v1과 RDS가 같은 VPC(10.0.0.0/16)이므로 v1에서 직접 RDS import (별도 복사 불필요)
+- [x] RDS에 import 완료
   ```bash
-  scp /tmp/billage-dev-*.sql.gz ubuntu@<v2-instance>:/tmp/
-  ```
-- [ ] RDS에 import
-  ```bash
-  gunzip -c /tmp/billage-dev-*.sql.gz | \
+  gunzip -c /tmp/billage-dev-20260301.sql.gz | \
     mysql -h billage-dev-v2-mysql.cpigi2qskxj3.ap-northeast-2.rds.amazonaws.com \
           -u billage_admin -p billage
   ```
-- [ ] 데이터 건수 검증 (v1 스냅샷과 비교)
-  ```bash
-  mysql -h <rds-endpoint> -u billage_admin -p -e "
-    SELECT 'users' AS tbl, COUNT(*) AS cnt FROM users
-    UNION ALL SELECT 'post', COUNT(*) FROM post
-    UNION ALL SELECT 'chatroom', COUNT(*) FROM chatroom
-    UNION ALL SELECT 'chat_message', COUNT(*) FROM chat_message;
-  " billage
-  ```
+- [x] 데이터 건수 검증 — v1과 RDS 100% 일치 확인
+  | 테이블 | v1 | RDS | 결과 |
+  |--------|-----|-----|------|
+  | users | 59 | 59 | 일치 |
+  | post | 74 | 74 | 일치 |
+  | chatroom | 35 | 35 | 일치 |
+  | chat_message | 2,066 | 2,066 | 일치 |
 
 ### Option B: Replica 기반 전환 (리허설 완료된 방식)
 
@@ -185,17 +173,12 @@
 
 ## Phase 3: DNS 스위칭
 
-### 3-1. Route 53 레코드 변경
+### 3-1. Route 53 레코드 변경 — ✅ 완료 (2026-03-01)
 
-- [ ] `dev.billages.com` A 레코드를 EC2 EIP → ALB Alias로 변경
+- [x] `dev.billages.com` A 레코드를 EC2 EIP → ALB Alias로 변경 (AWS CLI 사용)
   ```bash
-  # Terraform으로 관리하는 경우
-  # v2/envs/dev/ 에서 Route53 레코드 수정 후
-  terraform plan
-  terraform apply
-
-  # 또는 AWS CLI (긴급 시)
-  aws route53 change-resource-record-sets --hosted-zone-id <zone-id> \
+  # Change ID: C09887371D76VJ54EH66K
+  aws route53 change-resource-record-sets --hosted-zone-id Z00048363AHGKAIPSRTJT \
     --change-batch '{
       "Changes": [{
         "Action": "UPSERT",
@@ -203,21 +186,20 @@
           "Name": "dev.billages.com",
           "Type": "A",
           "AliasTarget": {
-            "HostedZoneId": "<alb-hosted-zone-id>",
-            "DNSName": "<alb-dns-name>",
+            "HostedZoneId": "ZWKZPGTI48KDX",
+            "DNSName": "billage-dev-v2-alb-2051104089.ap-northeast-2.elb.amazonaws.com",
             "EvaluateTargetHealth": true
           }
         }
       }]
     }'
   ```
-- [ ] DNS 전파 확인 (TTL 대기)
+- [x] DNS 전파 확인 완료 (INSYNC)
   ```bash
-  # 반복 확인 (기존 TTL 300초 → 최대 5분 대기)
   dig dev.billages.com +short
-  nslookup dev.billages.com
+  # → 52.78.239.249, 43.203.94.64 (ALB IPs)
   ```
-- [ ] v2.dev.billages.com 레코드는 유지 (테스트용)
+- [x] v2.dev.billages.com 레코드는 유지 (테스트용)
 
 ### 3-2. v1 Nginx 최종 정지
 
@@ -272,18 +254,19 @@
 
 ### 4-1. 기능 검증
 
-- [ ] `https://dev.billages.com` 접속 → 프론트엔드 로딩
+- [x] `https://dev.billages.com` 접속 → 프론트엔드 로딩 (HTTP 307 리다이렉트 정상)
 - [ ] 로그인 테스트 (JWT 발급 확인)
-- [ ] API 호출 테스트: `curl https://dev.billages.com/api/actuator/health`
-- [ ] AI 호출 테스트: `curl https://dev.billages.com/ai/health`
+- [x] API 호출 테스트: `curl https://api-v2.billages.com/actuator/health` → `{"status":"UP"}`
+  > 참고: Backend는 `api-v2.billages.com` 서브도메인으로 host 기반 라우팅
+- [ ] ~~AI 호출 테스트~~ — AI TG unhealthy (별도 확인 필요)
 - [ ] DB 연결 확인 (게시글 목록 조회 등 실제 데이터 조회)
 - [ ] 이미지 업로드 테스트 (S3 Presigned URL)
 - [ ] WebSocket 연결 테스트 (채팅 기능, `/ws/*` 경로)
 
 ### 4-2. 인프라 검증
 
-- [ ] ALB Target Group 모두 healthy
-- [ ] RDS 연결 정상 (CloudWatch 지표 확인)
+- [x] ALB Target Group — BE/FE healthy (AI unhealthy, 별도 이슈)
+- [x] RDS 연결 정상 (`available`, 데이터 검증 완료)
 - [ ] 모니터링 확인 (Prometheus → v2 인스턴스 메트릭 수집 확인)
 - [ ] 로그 수집 확인 (Promtail → Loki)
 
@@ -303,8 +286,8 @@
 
 ### 5-1. v1 인프라 유지 (롤백 대비)
 
-- [ ] v1 EC2 인스턴스 **중지하되 삭제하지 않음** (최소 1~2주)
-- [ ] v1 MySQL 데이터 보존 (롤백 시 필요)
+- [x] v1 EC2 인스턴스 **running 상태로 유지** (롤백 대비, 당분간 삭제하지 않음)
+- [x] v1 MySQL 데이터 보존 (롤백 시 필요)
 - [ ] v1 EIP는 유지 또는 해제 결정
   - 유지: 롤백 시 DNS 원복 가능 (비용: 미사용 EIP $3.6/월)
   - 해제: 비용 절감, 롤백 시 새 IP 필요
@@ -321,6 +304,26 @@
 - [ ] 일 1회 ALB/ASG/RDS 상태 점검
 - [ ] 팀원 피드백 수집 (속도, 기능 이상 등)
 - [ ] 이슈 없으면 v1 인스턴스 종료 및 리소스 정리
+
+---
+
+## 전환 중 발견된 이슈 및 조치
+
+### 이슈 1: CI/CD 배포 시 중단 발생 (Instance Refresh)
+
+- **원인**: ASG max_size=1, MinHealthyPercentage=0 → Instance Refresh 시 기존 인스턴스를 먼저 종료하고 새 인스턴스를 띄우는 구조 (중단 배포)
+- **조치**: Terraform 코드 수정 (2026-03-01)
+  - `max_size`: 1 → **2** (배포 시 일시적으로 2대 허용, 평소 1대 유지)
+  - `min_healthy_percentage`: 0 → **100** (새 인스턴스가 healthy 확인 후 기존 종료)
+  - 대상: BE/FE/AI ASG 모두 적용
+  - 파일: `v2/envs/dev/variables.tf`, `v2/envs/dev/main.tf`
+- **효과**: 무중단 배포 달성, 비용은 배포 중 ~5분간만 추가 인스턴스 비용 발생
+
+### 이슈 2: AI Target Group unhealthy
+
+- **상태**: AI ASG 인스턴스가 TG 헬스체크 실패 (502 Bad Gateway)
+- **영향**: AI 서비스 접속 불가 (`/ai/*` 경로)
+- **조치**: 별도 확인 필요 (마이그레이션 자체와는 무관)
 
 ---
 

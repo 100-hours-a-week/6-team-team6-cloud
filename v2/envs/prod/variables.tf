@@ -89,25 +89,25 @@ variable "key_name" {
 variable "backend_instance_type" {
   description = "Backend 인스턴스 타입"
   type        = string
-  default     = "t3.small" # 2 vCPU, 2GB (x86_64)
+  default     = "t3.micro" # 2 vCPU, 1GB (x86_64)
 }
 
 variable "backend_asg_desired" {
   description = "Backend ASG 희망 인스턴스 수"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "backend_asg_min" {
   description = "Backend ASG 최소 인스턴스 수"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "backend_asg_max" {
   description = "Backend ASG 최대 인스턴스 수"
   type        = number
-  default     = 4
+  default     = 2
 }
 
 #==============================================================================
@@ -116,25 +116,25 @@ variable "backend_asg_max" {
 variable "frontend_instance_type" {
   description = "Frontend 인스턴스 타입"
   type        = string
-  default     = "t3.small" # 2 vCPU, 2GB (x86_64)
+  default     = "t3.micro" # 2 vCPU, 1GB (x86_64)
 }
 
 variable "frontend_asg_desired" {
   description = "Frontend ASG 희망 인스턴스 수"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "frontend_asg_min" {
   description = "Frontend ASG 최소 인스턴스 수"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "frontend_asg_max" {
   description = "Frontend ASG 최대 인스턴스 수"
   type        = number
-  default     = 4
+  default     = 2
 }
 
 #==============================================================================
@@ -143,25 +143,25 @@ variable "frontend_asg_max" {
 variable "ai_instance_type" {
   description = "AI 인스턴스 타입"
   type        = string
-  default     = "t3.small" # 2 vCPU, 2GB (x86_64)
+  default     = "t3.micro" # 2 vCPU, 1GB (x86_64)
 }
 
 variable "ai_asg_desired" {
   description = "AI ASG 희망 인스턴스 수"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "ai_asg_min" {
   description = "AI ASG 최소 인스턴스 수"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "ai_asg_max" {
   description = "AI ASG 최대 인스턴스 수"
   type        = number
-  default     = 4
+  default     = 2
 }
 
 #==============================================================================
