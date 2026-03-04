@@ -185,9 +185,9 @@ resource "aws_security_group" "vpn" {
   # VPN 서버가 NAT 역할을 하려면 내부 VPC CIDR에서 들어오는 트래픽 허용
   ingress {
     description = "Allow all from Management VPC for NAT"
-    from_port   = 0           # 모든 포트
-    to_port     = 0           # 모든 포트
-    protocol    = "-1"        # 모든 프로토콜
+    from_port   = 0              # 모든 포트
+    to_port     = 0              # 모든 포트
+    protocol    = "-1"           # 모든 프로토콜
     cidr_blocks = [var.vpc_cidr] # Management VPC CIDR
   }
 
@@ -230,8 +230,8 @@ resource "aws_security_group" "vpn" {
 }
 
 #==============================================================================
-# IAM Role - Prometheus EC2 Service Discovery
-# dev/prod 타겟 서버를 자동 발견하기 위한 ec2:DescribeInstances 권한
+# IAM Role - Prometheus/YACE Discovery
+# dev/prod 타겟 서버 및 ALB CloudWatch 지표 조회 권한
 #==============================================================================
 resource "aws_iam_role" "prometheus_ec2_discovery" {
   name = "${var.project_name}-${var.env}-prometheus-ec2-discovery"
@@ -263,7 +263,15 @@ resource "aws_iam_role_policy" "prometheus_ec2_discovery" {
     Statement = [{
       Effect = "Allow"
       Action = [
-        "ec2:DescribeInstances"
+        "ec2:DescribeInstances",
+        "cloudwatch:GetMetricData",
+        "cloudwatch:GetMetricStatistics",
+        "cloudwatch:ListMetrics",
+        "tag:GetResources",
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeTargetGroups",
+        "elasticloadbalancing:DescribeTargetHealth",
+        "elasticloadbalancing:DescribeTags"
       ]
       Resource = "*"
     }]

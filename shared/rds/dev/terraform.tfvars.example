@@ -15,3 +15,7 @@ username = "billage_admin"
 
 deletion_protection = false
 skip_final_snapshot = true
+
+# Monitoring server 접근용 (management VPC)
+management_vpc_cidr                 = "10.2.0.0/16"
+management_vpc_peering_connection_id = "pcx-0f57e5fe71ee6c565"

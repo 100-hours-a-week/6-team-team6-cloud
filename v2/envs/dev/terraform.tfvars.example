@@ -25,6 +25,7 @@ vpn_cidr = ["10.100.0.0/24"]  # WireGuard VPN
 golden_ami_id        = "ami-01488502d83cfffa4"  # billage-golden-ami
 app_root_volume_size = 20
 key_name             = "billage-keypair"
+monitoring_loki_url  = "http://10.2.2.42:3100/loki/api/v1/push"
 
 #==============================================================================
 # Backend ASG 설정

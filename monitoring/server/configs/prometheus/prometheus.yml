@@ -10,7 +10,7 @@ scrape_configs:
       - targets: ['localhost:9090']
 
   # ============================================
-  # EC2 Service Discovery
+  # EC2 Service Discovery (v1 기존 유지)
   # ============================================
   - job_name: 'ec2-node-exporter'
     ec2_sd_configs:
@@ -100,3 +100,103 @@ scrape_configs:
         target_label: az
       - source_labels: [__meta_ec2_tag_Name]
         target_label: instance
+
+  # ============================================
+  # v2 ASG 모니터링 (신규)
+  # MonitoringScope: dev-v2 / prod-v2
+  # ============================================
+  - job_name: 'ec2-v2-node-exporter'
+    ec2_sd_configs:
+      - region: ap-northeast-2
+        refresh_interval: 30s
+        filters:
+          - name: tag:MonitoringScope
+            values: ['dev-v2', 'prod-v2']
+          - name: tag:Service
+            values: ['backend', 'frontend', 'ai']
+          - name: instance-state-name
+            values: ['running']
+    relabel_configs:
+      - source_labels: [__meta_ec2_private_ip]
+        replacement: '${1}:9100'
+        target_label: __address__
+      - source_labels: [__meta_ec2_instance_id]
+        target_label: instance_id
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance_name
+      - source_labels: [__meta_ec2_tag_MonitoringScope]
+        target_label: monitoring_scope
+      - source_labels: [__meta_ec2_tag_Service]
+        target_label: service
+      - source_labels: [__meta_ec2_availability_zone]
+        target_label: az
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance
+
+  - job_name: 'ec2-v2-cadvisor'
+    ec2_sd_configs:
+      - region: ap-northeast-2
+        refresh_interval: 30s
+        filters:
+          - name: tag:MonitoringScope
+            values: ['dev-v2', 'prod-v2']
+          - name: tag:Service
+            values: ['backend', 'frontend', 'ai']
+          - name: instance-state-name
+            values: ['running']
+    relabel_configs:
+      - source_labels: [__meta_ec2_private_ip]
+        replacement: '${1}:8082'
+        target_label: __address__
+      - source_labels: [__meta_ec2_instance_id]
+        target_label: instance_id
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance_name
+      - source_labels: [__meta_ec2_tag_MonitoringScope]
+        target_label: monitoring_scope
+      - source_labels: [__meta_ec2_tag_Service]
+        target_label: service
+      - source_labels: [__meta_ec2_availability_zone]
+        target_label: az
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance
+
+  - job_name: 'ec2-v2-spring-actuator'
+    ec2_sd_configs:
+      - region: ap-northeast-2
+        refresh_interval: 30s
+        filters:
+          - name: tag:MonitoringScope
+            values: ['dev-v2', 'prod-v2']
+          - name: tag:Service
+            values: ['backend']
+          - name: instance-state-name
+            values: ['running']
+    metrics_path: '/actuator/prometheus'
+    relabel_configs:
+      - source_labels: [__meta_ec2_private_ip]
+        replacement: '${1}:8080'
+        target_label: __address__
+      - source_labels: [__meta_ec2_instance_id]
+        target_label: instance_id
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance_name
+      - source_labels: [__meta_ec2_tag_MonitoringScope]
+        target_label: monitoring_scope
+      - source_labels: [__meta_ec2_tag_Service]
+        target_label: service
+      - source_labels: [__meta_ec2_availability_zone]
+        target_label: az
+      - source_labels: [__meta_ec2_tag_Name]
+        target_label: instance
+
+  # ============================================
+  # 중앙 Exporter (신규)
+  # ============================================
+  - job_name: 'rds-mysql-exporter'
+    static_configs:
+      - targets: ['rds-mysql-exporter-dev:9104', 'rds-mysql-exporter-prod:9104']
+
+  - job_name: 'alb-cloudwatch'
+    static_configs:
+      - targets: ['yace:5000']

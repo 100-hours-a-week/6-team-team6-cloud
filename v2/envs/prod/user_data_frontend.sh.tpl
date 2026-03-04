@@ -13,6 +13,7 @@ ENV="${env}"
 PROJECT_NAME="${project_name}"
 AWS_REGION="${aws_region}"
 ECR_REGISTRY="${ecr_registry}"
+MONITORING_LOKI_URL="${monitoring_loki_url}"
 SERVICE="fe"
 CONTAINER_NAME="billage-frontend"
 CONTAINER_PORT=3000
@@ -21,6 +22,24 @@ IMAGE="$ECR_REGISTRY/$PROJECT_NAME-$SERVICE:$ENV-latest"
 echo "Environment: $ENV"
 echo "Service: $SERVICE"
 echo "ECR Registry: $ECR_REGISTRY"
+echo "Monitoring Loki URL: $MONITORING_LOKI_URL"
+
+# Monitoring agent 환경변수 주입
+MONITORING_ENV_FILE="/etc/default/monitoring"
+cat > "$MONITORING_ENV_FILE" <<EOF
+APP_NAME=frontend
+ENV=$ENV
+HOSTNAME=$(hostname -f 2>/dev/null || hostname)
+LOKI_URL=$MONITORING_LOKI_URL
+EOF
+chmod 644 "$MONITORING_ENV_FILE"
+
+# Golden AMI에 포함된 monitoring.service 활성화
+if systemctl list-unit-files | grep -q '^monitoring.service'; then
+  systemctl daemon-reload || true
+  systemctl enable monitoring.service || true
+  systemctl restart monitoring.service || true
+fi
 
 # ECR 인증: Golden AMI에 docker-credential-ecr-login이 설치되어 있어
 # credsStore=ecr-login 설정으로 IAM Role 기반 자동 인증 (docker login 불필요)

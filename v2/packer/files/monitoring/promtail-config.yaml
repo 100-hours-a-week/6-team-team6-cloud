@@ -6,7 +6,7 @@ positions:
   filename: /tmp/positions.yaml
 
 clients:
-  - url: http://loki:3100/loki/api/v1/push
+  - url: ${LOKI_URL}
 
 scrape_configs:
   # Application logs
@@ -16,6 +16,7 @@ scrape_configs:
           - localhost
         labels:
           job: ${APP_NAME}
+          env: ${ENV}
           host: ${HOSTNAME}
           __path__: /var/log/app/*.log
     pipeline_stages:
@@ -35,6 +36,22 @@ scrape_configs:
             - '2006-01-02T15:04:05'
             - '2006-01-02 15:04:05'
 
+  # Docker container stdout/stderr logs (json-file)
+  - job_name: ${APP_NAME}-docker
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: ${APP_NAME}
+          env: ${ENV}
+          host: ${HOSTNAME}
+          source: docker
+          __path__: /var/lib/docker/containers/*/*-json.log
+    pipeline_stages:
+      - docker: {}
+      - labels:
+          source:
+
   # System logs (syslog)
   - job_name: syslog
     static_configs:
@@ -42,6 +59,7 @@ scrape_configs:
           - localhost
         labels:
           job: syslog
+          env: ${ENV}
           host: ${HOSTNAME}
           __path__: /var/log/syslog
     pipeline_stages:
@@ -49,6 +67,7 @@ scrape_configs:
           expression: '^(?P<timestamp>\w+\s+\d+\s+\d+:\d+:\d+)\s+(?P<host>\S+)\s+(?P<program>[^\[]+)(\[(?P<pid>\d+)\])?:\s+(?P<message>.*)$'
       - labels:
           program:
+          host:
 
   # Auth logs
   - job_name: auth
@@ -57,5 +76,12 @@ scrape_configs:
           - localhost
         labels:
           job: auth
+          env: ${ENV}
           host: ${HOSTNAME}
           __path__: /var/log/auth.log
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\w+\s+\d+\s+\d+:\d+:\d+)\s+(?P<host>\S+)\s+(?P<program>[^\[]+)(\[(?P<pid>\d+)\])?:\s+(?P<message>.*)$'
+      - labels:
+          program:
+          host:

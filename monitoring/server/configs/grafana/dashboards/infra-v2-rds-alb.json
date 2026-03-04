@@ -1,0 +1,714 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [
+    {
+      "title": "Billage V2 App Observability",
+      "type": "dashboards",
+      "uid": "billages-v2-observability"
+    },
+    {
+      "title": "Billages V2 통합 로그 대시보드",
+      "type": "dashboards",
+      "uid": "billages-loki-logs-v2"
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max by (tag_Name) (aws_applicationelb_request_count_sum{job=\"alb-cloudwatch\",tag_Name=~\"$alb_name\"}) / 60",
+          "legendFormat": "{{tag_Name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "ALB Ingress RPS",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max by (tag_Name) (clamp_min(aws_applicationelb_httpcode_target_5_xx_count_sum{job=\"alb-cloudwatch\",tag_Name=~\"$alb_name\"}, 0)) / 60",
+          "legendFormat": "{{tag_Name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "ALB Target 5xx/s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "1000 * max by (tag_Name) (aws_applicationelb_target_response_time_average{job=\"alb-cloudwatch\",tag_Name=~\"$alb_name\"})",
+          "legendFormat": "{{tag_Name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "ALB Target Response Time (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max by (tag_Name) (aws_applicationelb_healthy_host_count_average{job=\"alb-cloudwatch\",tag_Name=~\"$alb_name\"})",
+          "legendFormat": "{{tag_Name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "ALB Healthy Targets",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "mysql_up{job=\"rds-mysql-exporter\",instance=~\"$rds_instance\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "RDS Exporter Up",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "rate(mysql_global_status_questions{job=\"rds-mysql-exporter\",instance=~\"$rds_instance\"}[1m])",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "RDS QPS",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 16
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "mysql_global_status_threads_connected{job=\"rds-mysql-exporter\",instance=~\"$rds_instance\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "RDS Threads Connected",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 16
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * mysql_global_status_threads_connected{job=\"rds-mysql-exporter\",instance=~\"$rds_instance\"} / clamp_min(mysql_global_variables_max_connections{job=\"rds-mysql-exporter\",instance=~\"$rds_instance\"}, 1)",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "RDS Connection Utilization (%)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 16
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum by (monitoring_scope, instance_name, pool) (hikaricp_connections_active{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",pool=~\"$pool\"}) / clamp_min(sum by (monitoring_scope, instance_name, pool) (hikaricp_connections_max{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",pool=~\"$pool\"}), 1)",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}} / {{pool}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Hikari Active/Max (%)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 24
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (monitoring_scope, instance_name, pool) (hikaricp_connections_pending{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",pool=~\"$pool\"})",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}} / {{pool}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Hikari Pending Connections",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 24
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (monitoring_scope, instance_name, pool) (rate(hikaricp_connections_timeout_total{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",pool=~\"$pool\"}[5m]))",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}} / {{pool}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Hikari Timeout/s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 24
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "1000 * sum by (monitoring_scope, instance_name, pool) (rate(hikaricp_connections_acquire_seconds_sum{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",pool=~\"$pool\"}[5m])) / clamp_min(sum by (monitoring_scope, instance_name, pool) (rate(hikaricp_connections_acquire_seconds_count{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",pool=~\"$pool\"}[5m])), 0.001)",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}} / {{pool}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Hikari Acquire Avg (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 13,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{env=~\"$log_env\", job=~\".*(backend|billages-backend).*\"} |~ \"(?i)(hikari|connection|deadlock|sql|timeout|too many connections)\"",
+          "refId": "A"
+        }
+      ],
+      "title": "DB/Connection 관련 로그 (V2)",
+      "type": "logs"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "billages",
+    "v2",
+    "rds",
+    "alb",
+    "hikari"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*-v2"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*-v2",
+        "label": "V2 Environment",
+        "multi": true,
+        "name": "v2_env",
+        "options": [
+          {
+            "selected": true,
+            "text": "All",
+            "value": ".*-v2"
+          },
+          {
+            "selected": false,
+            "text": "dev-v2",
+            "value": "dev-v2"
+          },
+          {
+            "selected": false,
+            "text": "prod-v2",
+            "value": "prod-v2"
+          }
+        ],
+        "query": "dev-v2,prod-v2",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "custom"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "label": "Monitoring Scope",
+        "multi": true,
+        "name": "monitoring_scope",
+        "options": [],
+        "query": "label_values(up{job=\"ec2-v2-spring-actuator\"}, monitoring_scope)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "label": "ALB Name",
+        "multi": true,
+        "name": "alb_name",
+        "options": [],
+        "query": "label_values(aws_applicationelb_request_count_sum{job=\"alb-cloudwatch\",tag_Name=~\".*(${v2_env:regex}).*-alb\"}, tag_Name)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "label": "Log Environment",
+        "multi": true,
+        "name": "log_env",
+        "options": [
+          {
+            "selected": true,
+            "text": "All",
+            "value": ".*"
+          },
+          {
+            "selected": false,
+            "text": "dev-v2",
+            "value": "dev"
+          },
+          {
+            "selected": false,
+            "text": "prod-v2",
+            "value": "prod"
+          }
+        ],
+        "query": "dev-v2 : dev,prod-v2 : prod",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "custom"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "label": "RDS Exporter Instance",
+        "multi": true,
+        "name": "rds_instance",
+        "options": [],
+        "query": "label_values(mysql_up{job=\"rds-mysql-exporter\"}, instance)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "label": "Hikari Pool",
+        "multi": true,
+        "name": "pool",
+        "options": [],
+        "query": "label_values(hikaricp_connections{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\"}, pool)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "Asia/Seoul",
+  "title": "Billage V2 RDS & ALB",
+  "uid": "billages-v2-rds-alb",
+  "version": 2,
+  "weekStart": ""
+}
