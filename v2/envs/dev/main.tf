@@ -535,7 +535,7 @@ resource "aws_lb_listener_rule" "api" {
 
   condition {
     host_header {
-      values = ["api-v2.${var.domain_name}"]
+      values = ["api-v2.${var.domain_name}", "api.${var.env}.${var.domain_name}"]
     }
   }
 }
@@ -928,3 +928,14 @@ resource "aws_route53_record" "api_v2" {
   }
 }
 
+resource "aws_route53_record" "api_dev" {
+  zone_id = data.aws_route53_zone.main.zone_id
+  name    = "api.${var.env}.${var.domain_name}"
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.main.dns_name
+    zone_id                = aws_lb.main.zone_id
+    evaluate_target_health = true
+  }
+}
