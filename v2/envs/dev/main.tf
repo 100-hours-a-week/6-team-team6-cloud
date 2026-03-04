@@ -511,6 +511,8 @@ resource "aws_lb_target_group" "ai" {
   port     = 5000
   protocol = "HTTP"
   vpc_id   = data.aws_vpc.existing.id
+  # AI 컨테이너가 큰 이미지를 pull하는 동안 교체 루프를 줄이기 위해 드레이닝 시간을 확장
+  deregistration_delay = 600
 
   health_check {
     enabled             = true
@@ -972,7 +974,8 @@ resource "aws_autoscaling_group" "ai" {
   target_group_arns   = [aws_lb_target_group.ai.arn]
 
   health_check_type         = "ELB"
-  health_check_grace_period = 300
+  # 대용량 이미지 pull + app 기동 시간까지 커버하도록 grace를 확장
+  health_check_grace_period = 7200
 
   launch_template {
     id      = aws_launch_template.ai.id

@@ -17,7 +17,7 @@ MONITORING_LOKI_URL="${monitoring_loki_url}"
 SERVICE="ai"
 CONTAINER_NAME="billage-ai"
 CONTAINER_PORT=5000
-IMAGE="$ECR_REGISTRY/$PROJECT_NAME-$SERVICE:latest"
+IMAGE="$ECR_REGISTRY/$PROJECT_NAME-$SERVICE:$ENV-latest"
 
 echo "Environment: $ENV"
 echo "Service: $SERVICE"
