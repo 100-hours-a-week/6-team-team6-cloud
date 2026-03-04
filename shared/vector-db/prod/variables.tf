@@ -1,4 +1,4 @@
-# shared/vector-db/dev/variables.tf
+# shared/vector-db/prod/variables.tf
 
 variable "aws_region" {
   description = "AWS Region"
@@ -15,7 +15,7 @@ variable "project_name" {
 variable "env" {
   description = "환경"
   type        = string
-  default     = "dev"
+  default     = "prod"
 }
 
 variable "golden_ami_id" {
@@ -63,7 +63,7 @@ variable "qdrant_allowed_cidr" {
   description = "Qdrant(6333, 6334) 접근 허용 CIDR"
   type        = list(string)
   default = [
-    "10.0.0.0/16",
+    "10.1.0.0/16",
     "10.2.0.0/16"
   ]
 }

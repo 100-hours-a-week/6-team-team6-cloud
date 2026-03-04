@@ -1,5 +1,5 @@
-# shared/vector-db/dev/main.tf
-# Dev 전용 외부 Qdrant 서버
+# shared/vector-db/prod/main.tf
+# Billage Prod 전용 Qdrant 서버
 
 terraform {
   required_version = ">= 1.0.0"
@@ -21,9 +21,9 @@ provider "aws" {
 }
 
 #==============================================================================
-# Data Sources - 기존 Dev 네트워크 참조
+# Data Sources - prod 네트워크 참조
 #==============================================================================
-data "aws_vpc" "dev" {
+data "aws_vpc" "prod" {
   tags = {
     Name = "${var.project_name}-${var.env}-vpc"
   }
@@ -40,8 +40,8 @@ data "aws_subnet" "public" {
 #==============================================================================
 resource "aws_security_group" "qdrant" {
   name        = "${var.project_name}-${var.env}-qdrant-sg"
-  description = "Security group for Qdrant dev server"
-  vpc_id      = data.aws_vpc.dev.id
+  description = "Security group for Qdrant prod server"
+  vpc_id      = data.aws_vpc.prod.id
 
   ingress {
     description = "SSH"

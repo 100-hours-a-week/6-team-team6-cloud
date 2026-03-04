@@ -1,9 +1,9 @@
-# shared/vector-db/dev/terraform.tfvars.example
+# shared/vector-db/prod/terraform.tfvars.example
 # 실제 배포 시 복사해서 terraform.tfvars로 사용
 
 aws_region   = "ap-northeast-2"
 project_name = "billage"
-env          = "dev"
+env          = "prod"
 
 # v2/packer/manifest.json 기준 Golden AMI 예시
 # 최신 값으로 교체 권장
@@ -18,9 +18,9 @@ root_volume_size = 20
 create_eip       = false
 associate_public_ip = true
 
-# VPN + 내부 통신 기준
+# VPN + VPC 내부 통신 기준
 ssh_allowed_cidr    = ["10.2.0.0/16"]
-qdrant_allowed_cidr = ["10.0.0.0/16", "10.2.0.0/16"]
+qdrant_allowed_cidr = ["10.1.0.0/16", "10.2.0.0/16"]
 
 qdrant_container_image = "qdrant/qdrant:latest"
-qdrant_api_key         = "replace-with-dev-qdrant-api-key"
+qdrant_api_key         = "replace-with-prod-qdrant-api-key"

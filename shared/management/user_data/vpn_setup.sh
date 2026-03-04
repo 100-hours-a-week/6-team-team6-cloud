@@ -62,9 +62,9 @@ iptables -A FORWARD -s 10.100.0.32/28 -p tcp -m multiport --dports 22,3306,8080 
 iptables -A FORWARD -s 10.100.0.48/28 -p tcp -m multiport --dports 80,443,3000 -j LOG --log-prefix "[VPN-FRONTEND] " --log-level 4
 iptables -A FORWARD -s 10.100.0.48/28 -p tcp -m multiport --dports 80,443,3000 -j ACCEPT
 
-# AIML: GPU, API
-iptables -A FORWARD -s 10.100.0.64/28 -p tcp -m multiport --dports 22,8000,8888 -j LOG --log-prefix "[VPN-AIML] " --log-level 4
-iptables -A FORWARD -s 10.100.0.64/28 -p tcp -m multiport --dports 22,8000,8888 -j ACCEPT
+# AIML: GPU, API, VectorDB
+iptables -A FORWARD -s 10.100.0.64/28 -p tcp -m multiport --dports 22,8000,8888,6333,6334 -j LOG --log-prefix "[VPN-AIML] " --log-level 4
+iptables -A FORWARD -s 10.100.0.64/28 -p tcp -m multiport --dports 22,8000,8888,6333,6334 -j ACCEPT
 
 # [LOGGING] 차단된 패킷 기록 (Promtail 수집용)
 iptables -A FORWARD -s 10.100.0.0/24 -j LOG --log-prefix "[VPN-DROP] " --log-level 4
