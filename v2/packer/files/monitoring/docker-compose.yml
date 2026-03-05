@@ -18,7 +18,7 @@ services:
     container_name: cadvisor
     restart: always
     ports:
-      - "8080:8080"
+      - "8082:8080"
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro
@@ -37,11 +37,15 @@ services:
     volumes:
       - /var/log/app:/var/log/app:ro
       - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - ./promtail-config.yaml:/etc/promtail/config.yaml:ro
     command:
       - '-config.file=/etc/promtail/config.yaml'
       - '-config.expand-env=true'
     environment:
       - APP_NAME=${APP_NAME:-unknown}
+      - ENV=${ENV:-unknown}
+      - HOSTNAME=${HOSTNAME:-unknown}
+      - LOKI_URL=${LOKI_URL}
     depends_on:
       - node-exporter

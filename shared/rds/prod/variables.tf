@@ -33,6 +33,18 @@ variable "private_subnet_cidr_c" {
   default     = "10.1.13.0/24"
 }
 
+variable "management_vpc_cidr" {
+  description = "Management VPC CIDR (모니터링 서버 접근 허용)"
+  type        = string
+  default     = "10.2.0.0/16"
+}
+
+variable "management_vpc_peering_connection_id" {
+  description = "Management VPC와의 피어링 연결 ID"
+  type        = string
+  default     = "pcx-0f49f933154acc793"
+}
+
 #==============================================================================
 # RDS 설정
 #==============================================================================

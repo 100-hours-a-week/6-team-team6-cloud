@@ -74,6 +74,12 @@ resource "aws_route_table" "private" {
   }
 }
 
+resource "aws_route" "private_to_management" {
+  route_table_id            = aws_route_table.private.id
+  destination_cidr_block    = var.management_vpc_cidr
+  vpc_peering_connection_id = var.management_vpc_peering_connection_id
+}
+
 resource "aws_route_table_association" "private_a" {
   subnet_id      = aws_subnet.private_a.id
   route_table_id = aws_route_table.private.id
@@ -98,7 +104,7 @@ resource "aws_security_group" "rds" {
     from_port   = 3306
     to_port     = 3306
     protocol    = "tcp"
-    cidr_blocks = [data.aws_vpc.main.cidr_block]
+    cidr_blocks = [data.aws_vpc.main.cidr_block, var.management_vpc_cidr]
   }
 
   egress {

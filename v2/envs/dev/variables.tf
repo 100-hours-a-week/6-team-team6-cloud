@@ -62,6 +62,12 @@ variable "vpn_cidr" {
   default     = ["10.2.0.0/16"] # Management VPC CIDR (VPN 서버가 Masquerade하므로)
 }
 
+variable "monitoring_loki_url" {
+  description = "Promtail 로그 전송 대상 Loki Push URL"
+  type        = string
+  default     = "http://10.2.2.42:3100/loki/api/v1/push"
+}
+
 #==============================================================================
 # EC2 공통 설정
 #==============================================================================

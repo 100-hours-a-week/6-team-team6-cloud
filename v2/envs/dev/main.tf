@@ -376,6 +376,65 @@ resource "aws_security_group" "ai" {
   }
 }
 
+# Monitoring Target Security Group (Exporters)
+resource "aws_security_group" "monitoring_target" {
+  name        = "${var.project_name}-${var.env}-v2-monitoring-target-sg"
+  description = "Security group for v2 monitoring exporters"
+  vpc_id      = data.aws_vpc.existing.id
+
+  ingress {
+    description = "Node Exporter from Management VPC"
+    from_port   = 9100
+    to_port     = 9100
+    protocol    = "tcp"
+    cidr_blocks = [var.management_vpc_cidr]
+  }
+
+  ingress {
+    description = "cAdvisor from Management VPC"
+    from_port   = 8082
+    to_port     = 8082
+    protocol    = "tcp"
+    cidr_blocks = [var.management_vpc_cidr]
+  }
+
+  ingress {
+    description = "Nginx Exporter from Management VPC"
+    from_port   = 9113
+    to_port     = 9113
+    protocol    = "tcp"
+    cidr_blocks = [var.management_vpc_cidr]
+  }
+
+  ingress {
+    description = "MySQL Exporter from Management VPC (optional)"
+    from_port   = 9104
+    to_port     = 9104
+    protocol    = "tcp"
+    cidr_blocks = [var.management_vpc_cidr]
+  }
+
+  ingress {
+    description = "Spring Actuator from Management VPC"
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = [var.management_vpc_cidr]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name    = "${var.project_name}-${var.env}-v2-monitoring-target-sg"
+    Service = "monitoring-target"
+  }
+}
+
 #==============================================================================
 # RDS / ElastiCache 참조 (shared에서 생성)
 #==============================================================================
@@ -452,6 +511,8 @@ resource "aws_lb_target_group" "ai" {
   port     = 5000
   protocol = "HTTP"
   vpc_id   = data.aws_vpc.existing.id
+  # AI 컨테이너가 큰 이미지를 pull하는 동안 교체 루프를 줄이기 위해 드레이닝 시간을 확장
+  deregistration_delay = 600
 
   health_check {
     enabled             = true
@@ -642,7 +703,7 @@ resource "aws_launch_template" "backend" {
   instance_type = var.backend_instance_type
   key_name      = var.key_name
 
-  vpc_security_group_ids = [aws_security_group.backend.id]
+  vpc_security_group_ids = [aws_security_group.backend.id, aws_security_group.monitoring_target.id]
 
   iam_instance_profile {
     name = aws_iam_instance_profile.app.name
@@ -665,10 +726,11 @@ resource "aws_launch_template" "backend" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user_data_backend.sh.tpl", {
-    env          = var.env
-    project_name = var.project_name
-    aws_region   = var.aws_region
-    ecr_registry = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
+    env                 = var.env
+    project_name        = var.project_name
+    aws_region          = var.aws_region
+    monitoring_loki_url = var.monitoring_loki_url
+    ecr_registry        = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
   }))
 
   tag_specifications {
@@ -693,7 +755,7 @@ resource "aws_launch_template" "frontend" {
   instance_type = var.frontend_instance_type
   key_name      = var.key_name
 
-  vpc_security_group_ids = [aws_security_group.frontend.id]
+  vpc_security_group_ids = [aws_security_group.frontend.id, aws_security_group.monitoring_target.id]
 
   iam_instance_profile {
     name = aws_iam_instance_profile.app.name
@@ -716,10 +778,11 @@ resource "aws_launch_template" "frontend" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user_data_frontend.sh.tpl", {
-    env          = var.env
-    project_name = var.project_name
-    aws_region   = var.aws_region
-    ecr_registry = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
+    env                 = var.env
+    project_name        = var.project_name
+    aws_region          = var.aws_region
+    monitoring_loki_url = var.monitoring_loki_url
+    ecr_registry        = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
   }))
 
   tag_specifications {
@@ -744,7 +807,7 @@ resource "aws_launch_template" "ai" {
   instance_type = var.ai_instance_type
   key_name      = var.key_name
 
-  vpc_security_group_ids = [aws_security_group.ai.id]
+  vpc_security_group_ids = [aws_security_group.ai.id, aws_security_group.monitoring_target.id]
 
   iam_instance_profile {
     name = aws_iam_instance_profile.app.name
@@ -767,10 +830,11 @@ resource "aws_launch_template" "ai" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user_data_ai.sh.tpl", {
-    env          = var.env
-    project_name = var.project_name
-    aws_region   = var.aws_region
-    ecr_registry = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
+    env                 = var.env
+    project_name        = var.project_name
+    aws_region          = var.aws_region
+    monitoring_loki_url = var.monitoring_loki_url
+    ecr_registry        = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
   }))
 
   tag_specifications {
@@ -825,6 +889,24 @@ resource "aws_autoscaling_group" "backend" {
     value               = "backend"
     propagate_at_launch = true
   }
+
+  tag {
+    key                 = "Version"
+    value               = "v2"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Environment"
+    value               = var.env
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "MonitoringScope"
+    value               = "dev-v2"
+    propagate_at_launch = true
+  }
 }
 
 # Frontend ASG
@@ -862,6 +944,24 @@ resource "aws_autoscaling_group" "frontend" {
     value               = "frontend"
     propagate_at_launch = true
   }
+
+  tag {
+    key                 = "Version"
+    value               = "v2"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Environment"
+    value               = var.env
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "MonitoringScope"
+    value               = "dev-v2"
+    propagate_at_launch = true
+  }
 }
 
 # AI ASG
@@ -874,7 +974,8 @@ resource "aws_autoscaling_group" "ai" {
   target_group_arns   = [aws_lb_target_group.ai.arn]
 
   health_check_type         = "ELB"
-  health_check_grace_period = 300
+  # 대용량 이미지 pull + app 기동 시간까지 커버하도록 grace를 확장
+  health_check_grace_period = 7200
 
   launch_template {
     id      = aws_launch_template.ai.id
@@ -897,6 +998,24 @@ resource "aws_autoscaling_group" "ai" {
   tag {
     key                 = "Service"
     value               = "ai"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Version"
+    value               = "v2"
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "Environment"
+    value               = var.env
+    propagate_at_launch = true
+  }
+
+  tag {
+    key                 = "MonitoringScope"
+    value               = "dev-v2"
     propagate_at_launch = true
   }
 }
@@ -927,7 +1046,6 @@ resource "aws_route53_record" "api_v2" {
     evaluate_target_health = true
   }
 }
-
 resource "aws_route53_record" "api_dev" {
   zone_id = data.aws_route53_zone.main.zone_id
   name    = "api.${var.env}.${var.domain_name}"

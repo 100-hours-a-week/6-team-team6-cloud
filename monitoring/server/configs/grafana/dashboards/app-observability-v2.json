@@ -1,0 +1,1329 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max by (tag_Name) (aws_applicationelb_request_count_sum{job=\"alb-cloudwatch\",tag_Name=~\".*(${env:regex}).*-alb\"}) / 60",
+          "legendFormat": "{{tag_Name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Nginx QPS",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max by (tag_Name) (aws_applicationelb_healthy_host_count_average{job=\"alb-cloudwatch\",tag_Name=~\".*(${env:regex}).*-alb\"})",
+          "legendFormat": "{{tag_Name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Nginx Active Connections",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max by (tag_Name) (clamp_min(aws_applicationelb_httpcode_target_5_xx_count_sum{job=\"alb-cloudwatch\",tag_Name=~\".*(${env:regex}).*-alb\"}, 0)) / 60",
+          "legendFormat": "{{tag_Name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Nginx 5xx/s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (monitoring_scope, instance_name) (rate(http_server_requests_seconds_count{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",uri!~\"/actuator.*\"}[1m]))",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Spring QPS",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "max": 1,
+          "min": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (monitoring_scope, instance_name) (rate(http_server_requests_seconds_count{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",status=~\"5..\",uri!~\"/actuator.*\"}[5m])) / clamp_min(sum by (monitoring_scope, instance_name) (rate(http_server_requests_seconds_count{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",uri!~\"/actuator.*\"}[5m])), 0.001)",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Spring 5xx Ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "1000 * sum by (monitoring_scope, instance_name) (rate(http_server_requests_seconds_sum{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",uri!~\"/actuator.*\"}[5m])) / clamp_min(sum by (monitoring_scope, instance_name) (rate(http_server_requests_seconds_count{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",uri!~\"/actuator.*\"}[5m])), 0.001)",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Spring Avg Latency (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 16
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "mysql_up{job=\"rds-mysql-exporter\",instance=~\"$rds_instance\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "MySQL Up",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 16
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "mysql_global_status_threads_connected{job=\"rds-mysql-exporter\",instance=~\"$rds_instance\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "MySQL Threads Connected",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 16
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "rate(mysql_global_status_questions{job=\"rds-mysql-exporter\",instance=~\"$rds_instance\"}[1m])",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "MySQL QPS",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 24
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum by (monitoring_scope, instance_name, pool) (hikaricp_connections_active{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",pool=~\"$pool\"}) / clamp_min(sum by (monitoring_scope, instance_name, pool) (hikaricp_connections_max{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",pool=~\"$pool\"}), 1)",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}} / {{pool}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Hikari Active/Max (%)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 24
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (monitoring_scope, instance_name, pool) (hikaricp_connections_pending{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",pool=~\"$pool\"})",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}} / {{pool}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Hikari Pending Connections",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 24
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "1000 * sum by (monitoring_scope, instance_name, pool) (rate(hikaricp_connections_acquire_seconds_sum{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",pool=~\"$pool\"}[5m])) / clamp_min(sum by (monitoring_scope, instance_name, pool) (rate(hikaricp_connections_acquire_seconds_count{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",pool=~\"$pool\"}[5m])), 0.001)",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}} / {{pool}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Hikari Acquire Avg (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 32
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum by (monitoring_scope, instance_name) (jvm_memory_used_bytes{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",area=\"heap\"}) / clamp_min(sum by (monitoring_scope, instance_name) (jvm_memory_max_bytes{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",area=\"heap\"}), 1)",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "JVM Heap Usage (%)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 32
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (monitoring_scope, instance_name, status) (rate(http_server_requests_seconds_count{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",status=~\"4..|5..\",uri!~\"/actuator.*\"}[1m]))",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}} / {{status}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Backend Error Requests/s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 32
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 - (avg by (monitoring_scope, service, instance_name) (rate(node_cpu_seconds_total{job=\"ec2-v2-node-exporter\",mode=\"idle\",monitoring_scope=~\"$monitoring_scope\",service=~\"$service\",instance_name=~\"$instance\"}[5m])) * 100)",
+          "legendFormat": "{{monitoring_scope}} / {{service}} / {{instance_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Host CPU Usage (%)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 40
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * (1 - (node_memory_MemAvailable_bytes{job=\"ec2-v2-node-exporter\",monitoring_scope=~\"$monitoring_scope\",service=~\"$service\",instance_name=~\"$instance\"} / node_memory_MemTotal_bytes{job=\"ec2-v2-node-exporter\",monitoring_scope=~\"$monitoring_scope\",service=~\"$service\",instance_name=~\"$instance\"}))",
+          "legendFormat": "{{monitoring_scope}} / {{service}} / {{instance_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Host Memory Usage (%)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 40
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (monitoring_scope, instance_name, name) (rate(container_cpu_usage_seconds_total{job=\"ec2-v2-cadvisor\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",image!=\"\",name!=\"\"}[5m]))",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}} / {{name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Container CPU Cores",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "mbytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 40
+      },
+      "id": 18,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (monitoring_scope, instance_name, name) (container_memory_working_set_bytes{job=\"ec2-v2-cadvisor\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",image!=\"\",name!=\"\"}) / 1024 / 1024",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}} / {{name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Container Memory Working Set (MB)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 48
+      },
+      "id": 19,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (monitoring_scope, instance_name, name) (changes(container_start_time_seconds{job=\"ec2-v2-cadvisor\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",image!=\"\",name!=\"\"}[15m]))",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}} / {{name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Container Restart Events (15m)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 48
+      },
+      "id": 20,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "1000 * sum by (monitoring_scope, instance_name) (rate(jvm_gc_pause_seconds_sum{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\"}[5m])) / clamp_min(sum by (monitoring_scope, instance_name) (rate(jvm_gc_pause_seconds_count{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\"}[5m])), 0.001)",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "JVM GC Pause Avg (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 48
+      },
+      "id": 21,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (monitoring_scope, instance_name) (up{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\"})",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Spring Actuator Up",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 56
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "1000 * histogram_quantile(0.95, sum by (le, monitoring_scope, instance_name) (rate(http_server_requests_seconds_bucket{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",uri!~\"/actuator.*\"}[5m])))",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Spring P95 Latency (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 56
+      },
+      "id": 23,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (monitoring_scope, instance_name) (rate(http_server_requests_seconds_count{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",status=~\"4..\",uri!~\"/actuator.*\"}[5m])) / clamp_min(sum by (monitoring_scope, instance_name) (rate(http_server_requests_seconds_count{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",uri!~\"/actuator.*\"}[5m])), 0.001)",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Spring 4xx Ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 56
+      },
+      "id": 24,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "1000 * max by (tag_Name) (aws_applicationelb_target_response_time_average{job=\"alb-cloudwatch\",tag_Name=~\".*(${env:regex}).*-alb\"})",
+          "legendFormat": "{{tag_Name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "ALB Target Response Time (ms)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 64
+      },
+      "id": 25,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (monitoring_scope, instance_name, pool) (rate(hikaricp_connections_timeout_total{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",pool=~\"$pool\"}[5m]))",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}} / {{pool}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Hikari Timeout/s",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 64
+      },
+      "id": 26,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (monitoring_scope, instance_name) (jvm_threads_live_threads{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\"})",
+          "legendFormat": "{{monitoring_scope}} / {{instance_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "JVM Live Threads",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 64
+      },
+      "id": 27,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * mysql_global_status_threads_connected{job=\"rds-mysql-exporter\",instance=~\"$rds_instance\"} / clamp_min(mysql_global_variables_max_connections{job=\"rds-mysql-exporter\",instance=~\"$rds_instance\"}, 1)",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "MySQL Connection Utilization (%)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 72
+      },
+      "id": 28,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * (1 - (node_filesystem_avail_bytes{job=\"ec2-v2-node-exporter\",monitoring_scope=~\"$monitoring_scope\",service=~\"$service\",instance_name=~\"$instance\",mountpoint=\"/\",fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{job=\"ec2-v2-node-exporter\",monitoring_scope=~\"$monitoring_scope\",service=~\"$service\",instance_name=~\"$instance\",mountpoint=\"/\",fstype!~\"tmpfs|overlay\"}))",
+          "legendFormat": "{{monitoring_scope}} / {{service}} / {{instance_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Host RootFS Usage (%)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 72
+      },
+      "id": 29,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "topk(10, sum by (uri) (rate(http_server_requests_seconds_count{job=\"ec2-v2-spring-actuator\",monitoring_scope=~\"$monitoring_scope\",instance_name=~\"$instance\",uri!~\"/actuator.*\"}[5m])))",
+          "legendFormat": "{{uri}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Top URI RPS (Top 10)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "billages",
+    "v2",
+    "app"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*-v2"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "label": "Monitoring Scope",
+        "multi": true,
+        "name": "monitoring_scope",
+        "options": [],
+        "query": "label_values(up{job=\"ec2-v2-node-exporter\"}, monitoring_scope)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "label": "Service",
+        "multi": true,
+        "name": "service",
+        "options": [],
+        "query": "label_values(up{job=\"ec2-v2-node-exporter\", monitoring_scope=~\"$monitoring_scope\"}, service)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "label": "Instance",
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(up{job=\"ec2-v2-node-exporter\", monitoring_scope=~\"$monitoring_scope\", service=~\"$service\"}, instance_name)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*-v2",
+        "label": "V2 Environment",
+        "multi": true,
+        "name": "env",
+        "options": [
+          {
+            "selected": true,
+            "text": "All",
+            "value": ".*-v2"
+          },
+          {
+            "selected": false,
+            "text": "dev-v2",
+            "value": "dev-v2"
+          },
+          {
+            "selected": false,
+            "text": "prod-v2",
+            "value": "prod-v2"
+          }
+        ],
+        "query": "dev-v2,prod-v2",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "custom"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "label": "RDS Exporter Instance",
+        "multi": true,
+        "name": "rds_instance",
+        "options": [],
+        "query": "label_values(mysql_up{job=\"rds-mysql-exporter\"}, instance)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "label": "Hikari Pool",
+        "multi": true,
+        "name": "pool",
+        "options": [],
+        "query": "label_values(hikaricp_connections{job=\"ec2-v2-spring-actuator\", monitoring_scope=~\"$monitoring_scope\"}, pool)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "Asia/Seoul",
+  "title": "Billage V2 App Observability",
+  "uid": "billages-v2-observability",
+  "version": 3,
+  "weekStart": ""
+}

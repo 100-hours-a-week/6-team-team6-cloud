@@ -44,6 +44,45 @@ services:
     networks:
       - monitoring
 
+  rds-mysql-exporter-dev:
+    image: prom/mysqld-exporter:v0.16.0
+    container_name: rds-mysql-exporter-dev
+    restart: unless-stopped
+    environment:
+      - MYSQLD_EXPORTER_PASSWORD=${RDS_EXPORTER_PASSWORD}
+    command:
+      - '--mysqld.username=${RDS_EXPORTER_USER}'
+      - '--mysqld.address=${RDS_DEV_ENDPOINT}'
+      - '--web.listen-address=:9104'
+    networks:
+      - monitoring
+
+  rds-mysql-exporter-prod:
+    image: prom/mysqld-exporter:v0.16.0
+    container_name: rds-mysql-exporter-prod
+    restart: unless-stopped
+    environment:
+      - MYSQLD_EXPORTER_PASSWORD=${RDS_EXPORTER_PASSWORD}
+    command:
+      - '--mysqld.username=${RDS_EXPORTER_USER}'
+      - '--mysqld.address=${RDS_PROD_ENDPOINT}'
+      - '--web.listen-address=:9104'
+    networks:
+      - monitoring
+
+  yace:
+    image: quay.io/prometheuscommunity/yet-another-cloudwatch-exporter:v0.63.0
+    container_name: yace
+    restart: unless-stopped
+    command:
+      - '--config.file=/config/config.yml'
+    volumes:
+      - ./configs/yace/config.yml:/config/config.yml:ro
+    environment:
+      - AWS_REGION=${YACE_AWS_REGION:-ap-northeast-2}
+    networks:
+      - monitoring
+
 networks:
   monitoring:
     driver: bridge

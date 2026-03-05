@@ -95,14 +95,19 @@ echo "=========================================="
 mkdir -p /opt/monitoring
 cp -r /tmp/monitoring/* /opt/monitoring/
 
-# Update Loki URL in promtail config if provided
-if [ -n "${LOKI_URL:-}" ]; then
-    sed -i "s|http://loki:3100/loki/api/v1/push|${LOKI_URL}|g" /opt/monitoring/promtail-config.yaml
-fi
-
 # Set proper permissions
 chmod 644 /opt/monitoring/docker-compose.yml
 chmod 644 /opt/monitoring/promtail-config.yaml
+
+# Create default monitoring environment file.
+# Runtime user_data will overwrite APP_NAME/ENV/HOSTNAME/LOKI_URL per service.
+cat > /etc/default/monitoring <<EOF
+APP_NAME=unknown
+ENV=unknown
+HOSTNAME=$(hostname -f 2>/dev/null || hostname)
+LOKI_URL=${LOKI_URL:-http://10.2.2.42:3100/loki/api/v1/push}
+EOF
+chmod 644 /etc/default/monitoring
 
 echo "=========================================="
 echo "Creating Application Log Directory..."

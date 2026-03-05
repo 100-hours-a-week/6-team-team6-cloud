@@ -1,0 +1,27 @@
+apiVersion: v1alpha1
+discovery:
+  exportedTagsOnMetrics:
+    AWS/ApplicationELB:
+      - Name
+      - Project
+      - Environment
+  jobs:
+    - type: AWS/ApplicationELB
+      regions:
+        - ap-northeast-2
+      period: 60
+      length: 300
+      metrics:
+        - name: RequestCount
+          statistics:
+            - Sum
+        - name: HTTPCode_Target_5XX_Count
+          statistics:
+            - Sum
+        - name: TargetResponseTime
+          statistics:
+            - Average
+            - p90
+        - name: HealthyHostCount
+          statistics:
+            - Average

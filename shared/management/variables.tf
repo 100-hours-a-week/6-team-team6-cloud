@@ -19,7 +19,7 @@ variable "env" {
 variable "aws_region" {
   description = "AWS 리전"
   type        = string
-  default     = "ap-northeast-2"  # 서울
+  default     = "ap-northeast-2" # 서울
 }
 
 #==============================================================================
@@ -56,13 +56,13 @@ variable "availability_zone" {
 variable "monitoring_instance_type" {
   description = "모니터링 서버 EC2 타입 (ARM) - Prometheus/Grafana/Loki"
   type        = string
-  default     = "t4g.small"  # 2 vCPU, 2GB RAM (swap으로 보완)
+  default     = "t4g.small" # 2 vCPU, 2GB RAM (swap으로 보완)
 }
 
 variable "vpn_instance_type" {
   description = "VPN 서버 EC2 타입 (ARM) - WireGuard + NAT instance"
   type        = string
-  default     = "t4g.micro"  # 2 vCPU, 1GB RAM (arm64 AMI 호환, t3.micro 대체)
+  default     = "t4g.micro" # 2 vCPU, 1GB RAM (arm64 AMI 호환, t3.micro 대체)
 }
 
 variable "monitoring_root_volume_size" {
@@ -110,7 +110,7 @@ variable "ssh_allowed_cidr" {
 variable "monitoring_admin_cidr" {
   description = "모니터링 UI 접근 허용 CIDR (Grafana, Prometheus) - WireGuard 터널 + VPC 내부"
   type        = list(string)
-  default     = ["10.100.0.0/24", "10.2.0.0/16"]  # WireGuard 터널 서브넷 + Management VPC
+  default     = ["10.100.0.0/24", "10.2.0.0/16"] # WireGuard 터널 서브넷 + Management VPC
 }
 
 #==============================================================================
