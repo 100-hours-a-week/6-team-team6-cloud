@@ -5,10 +5,12 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - HOSTNAME=${HOSTNAME:-unknown}
     volumes:
-      # 호스트의 실제 로그 디렉토리를 마운트 (systemd 서비스 로그)
-      - ${NGINX_LOG_PATH}:/var/log/nginx:ro
-      - ${SPRING_LOG_PATH}:/var/log/spring:ro
+      - /var/log/app:/var/log/app:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - ./promtail-config.yml:/etc/promtail/config.yml:ro
       - ./positions:/var/lib/promtail
     command: -config.file=/etc/promtail/config.yml -config.expand-env=true
