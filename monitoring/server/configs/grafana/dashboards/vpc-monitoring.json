@@ -14,25 +14,6 @@
         "type": "loki",
         "uid": "loki"
       },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
       "gridPos": {
         "h": 4,
         "w": 6,
@@ -71,24 +52,6 @@
       "datasource": {
         "type": "loki",
         "uid": "loki"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
       },
       "gridPos": {
         "h": 4,
@@ -186,7 +149,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{job=\"vpn-traffic\", role=~\"$role\"} | line_format \"[{{.role}}] {{.src_ip}} -> {{.dst_ip}}:{{.dst_port}} ({{.protocol}})\"",
+          "expr": "{job=\"vpn-traffic\", role=~\".*\"} | regexp \"SRC=(?P<src_ip>[^ ]+) DST=(?P<dst_ip>[^ ]+) .* PROTO=(?P<protocol>[^ ]+) .* DPT=(?P<dst_port>[^ ]+)\" | line_format \"[{{.role}}] {{.src_ip}} -> {{.dst_ip}}:{{.dst_port}} ({{.protocol}})\"",
           "queryType": "range",
           "refId": "A"
         }
@@ -198,31 +161,6 @@
       "datasource": {
         "type": "loki",
         "uid": "loki"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -248,7 +186,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "topk(10, sum by (role, src_ip, dst_ip, dst_port) (count_over_time({job=\"vpn-traffic\", role=~\"$role\"} [$__range])))",
+          "expr": "topk(10, sum by (role, src_ip, dst_ip, dst_port) (count_over_time({job=\"vpn-traffic\", role=~\".*\"} | regexp \"SRC=(?P<src_ip>[^ ]+) DST=(?P<dst_ip>[^ ]+) .* PROTO=(?P<protocol>[^ ]+) .* DPT=(?P<dst_port>[^ ]+)\" [$__range])))",
           "queryType": "instant",
           "refId": "A"
         }
@@ -290,7 +228,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{job=\"vpn-traffic\", role=~\"$role\", dst_port=~\"22|3306|5432|6379|27017\"} | line_format \"[SECURITY][{{.role}}] {{.src_ip}} -> {{.dst_ip}}:{{.dst_port}}\"",
+          "expr": "{job=\"vpn-traffic\", role=~\".*\", dst_port=~\"22|3306|5432|6379|27017\"} | regexp \"SRC=(?P<src_ip>[^ ]+) DST=(?P<dst_ip>[^ ]+) .* PROTO=(?P<protocol>[^ ]+) .* DPT=(?P<dst_port>[^ ]+)\" | line_format \"[SECURITY][{{.role}}] {{.src_ip}} -> {{.dst_ip}}:{{.dst_port}}\"",
           "queryType": "range",
           "refId": "A"
         }
@@ -321,31 +259,6 @@
             "selected": true,
             "text": "All",
             "value": ".*"
-          },
-          {
-            "selected": false,
-            "text": "DevOps",
-            "value": "devops"
-          },
-          {
-            "selected": false,
-            "text": "Backend",
-            "value": "backend"
-          },
-          {
-            "selected": false,
-            "text": "Frontend",
-            "value": "frontend"
-          },
-          {
-            "selected": false,
-            "text": "AI/ML",
-            "value": "aiml"
-          },
-          {
-            "selected": false,
-            "text": "Unknown",
-            "value": "unknown"
           }
         ],
         "query": "",
@@ -362,6 +275,6 @@
   "timezone": "Asia/Seoul",
   "title": "VPN Monitoring Dashboard",
   "uid": "billages-vpn-monitoring",
-  "version": 2,
+  "version": 6,
   "weekStart": ""
 }
