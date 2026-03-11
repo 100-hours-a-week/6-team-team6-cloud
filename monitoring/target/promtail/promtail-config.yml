@@ -1,48 +1,107 @@
 server:
   http_listen_port: 9080
+  grpc_listen_port: 0
 
 positions:
   filename: /var/lib/promtail/positions.yaml
 
 clients:
-  - url: http://${LOKI_HOST}:3100/loki/api/v1/push
+  - url: ${LOKI_URL}
     batchwait: 1s
     batchsize: 102400
     timeout: 10s
 
-
 scrape_configs:
-  # Spring Boot Backend
-  - job_name: billages-backend
+  # Application file logs, if the service writes to /var/log/app.
+  - job_name: ${APP_NAME}
     static_configs:
-      - targets: [localhost]
+      - targets:
+          - localhost
         labels:
-          job: billages-backend
+          job: ${APP_NAME}
           env: ${ENV}
-          __path__: ${SPRING_LOG_FILE_PATH}
+          host: ${HOSTNAME}
+          __path__: /var/log/app/*.log
     pipeline_stages:
       - multiline:
-          firstline: '^\d{4}-\d{2}-\d{2}T'
+          firstline: '^\d{4}-\d{2}-\d{2}'
           max_wait_time: 3s
       - regex:
-          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\s+(?P<level>INFO|WARN|ERROR|DEBUG)\s+(?P<pid>\d+)\s+---\s+\[(?P<thread>[^\]]+)\]'
-      - timestamp:
-          source: timestamp
-          format: '2006-01-02T15:04:05.000Z'
+          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[.,]?\d*)\s*(?P<level>\w+)\s*(?P<message>.*)$'
       - labels:
           level:
-          thread:
+      - timestamp:
+          source: timestamp
+          format: '2006-01-02T15:04:05.000'
+          fallback_formats:
+            - '2006-01-02 15:04:05.000'
+            - '2006-01-02 15:04:05,000'
+            - '2006-01-02T15:04:05'
+            - '2006-01-02 15:04:05'
 
-  # Nginx
+  # Docker stdout/stderr logs (json-file driver).
+  - job_name: ${APP_NAME}-docker
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: ${APP_NAME}
+          env: ${ENV}
+          host: ${HOSTNAME}
+          source: docker
+          __path__: /var/lib/docker/containers/*/*-json.log
+    pipeline_stages:
+      - docker: {}
+      - regex:
+          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[.,]?\d*(?:Z)?)\s+(?P<level>TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\b'
+      - labels:
+          source:
+          level:
+
   - job_name: nginx
     static_configs:
-      - targets: [localhost]
+      - targets:
+          - localhost
         labels:
           job: nginx
           env: ${ENV}
-          __path__: ${NGINX_LOG_FILE_PATH}
+          host: ${HOSTNAME}
+          __path__: /var/log/nginx/access.log
     pipeline_stages:
       - regex:
-          expression: '" (?P<status>\d+) '
+          expression: '"(?P<method>[A-Z]+) [^"]*" (?P<status>\d+) '
       - labels:
+          method:
           status:
+
+  - job_name: syslog
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: syslog
+          env: ${ENV}
+          host: ${HOSTNAME}
+          __path__: /var/log/syslog
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\w+\s+\d+\s+\d+:\d+:\d+)\s+(?P<host>\S+)\s+(?P<program>[^\[]+)(\[(?P<pid>\d+)\])?:\s+(?P<message>.*)$'
+      - labels:
+          program:
+          host:
+
+  - job_name: auth
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: auth
+          env: ${ENV}
+          host: ${HOSTNAME}
+          __path__: /var/log/auth.log
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\w+\s+\d+\s+\d+:\d+:\d+)\s+(?P<host>\S+)\s+(?P<program>[^\[]+)(\[(?P<pid>\d+)\])?:\s+(?P<message>.*)$'
+      - labels:
+          program:
+          host:

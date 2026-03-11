@@ -2,6 +2,12 @@
 
 Prometheus + Grafana + Loki 기반 모니터링 시스템
 
+## 근본 목적
+이 문서의 목적은 Prometheus, Grafana, Loki, Promtail 구성을 일관되게 유지해 운영 관측 공백을 줄이고, 장애 발생 시 로그와 메트릭의 원인 추적 시간을 단축하는 것이다.
+
+## 비목적
+이 문서는 대시보드 디자인 개편이나 무관한 인프라 리팩터링을 설명하지 않으며, 이번 범위 밖의 서비스 아키텍처 변경까지 다루지 않는다.
+
 ## 구조
 
 ```
@@ -104,19 +110,15 @@ vim .env
 
 **수정 필요 항목:**
 ```bash
-# Loki 서버 주소 (모니터링 서버의 Private IP)
-LOKI_HOST=10.0.1.231  # 모니터링 서버 Private IP
+# Loki Push API
+LOKI_URL=http://10.2.2.42:3100/loki/api/v1/push
 
-# Environment
+# Application / Environment labels
+APP_NAME=backend
 ENV=dev
 
-# 로그 디렉토리 경로 (systemd 서비스 로그 위치)
-NGINX_LOG_PATH=/var/log/nginx
-SPRING_LOG_PATH=/var/log/billage/backend
-
-# 로그 파일 경로
-NGINX_LOG_FILE_PATH=/var/log/nginx/access.log
-SPRING_LOG_FILE_PATH=/var/log/billage/backend/app.log
+# Optional host label
+HOSTNAME=$(hostname -f)
 ```
 
 ```bash
@@ -136,6 +138,7 @@ curl localhost:9104/metrics  # MySQL Exporter
 curl localhost:9113/metrics  # Nginx Exporter
 curl localhost:9104/metrics | grep '^mysql_up'   # mysql_up 1 확인
 curl localhost:9113/metrics | grep '^nginx_up'   # nginx_up 1 확인
+docker logs --tail 50 promtail
 ```
 
 ### Prod에서 로컬 전용 Nginx status 엔드포인트를 쓰는 경우
@@ -189,9 +192,10 @@ sudo systemctl reload nginx   # restart 금지 (무중단)
 3. 보안 그룹 확인 (포트 열림 + 모니터링 서버 IP 허용)
 
 ### Promtail 로그가 안 들어올 때
-1. `LOKI_HOST` IP 확인 (모니터링 서버 Private IP)
-2. 로그 파일 경로 확인 (`NGINX_LOG_PATH`, `SPRING_LOG_FILE_PATH`)
-3. 로그 파일 읽기 권한 확인
+1. `LOKI_URL`이 `http://<monitoring-private-ip>:3100/loki/api/v1/push` 형식인지 확인
+2. `docker info --format '{{.LoggingDriver}}'`가 `json-file`인지 확인
+3. `/var/log/app` 또는 `docker logs <app-container>`에 실제 애플리케이션 로그가 있는지 확인
+4. `docker logs promtail`에서 `/var/lib/docker/containers/*/*-json.log` target 추가 여부 확인
 
 ### MySQL Exporter 연결 실패
 1. MySQL exporter 계정 생성 확인

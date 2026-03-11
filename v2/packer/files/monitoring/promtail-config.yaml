@@ -49,8 +49,11 @@ scrape_configs:
           __path__: /var/lib/docker/containers/*/*-json.log
     pipeline_stages:
       - docker: {}
+      - regex:
+          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[.,]?\d*(?:Z)?)\s+(?P<level>TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\b'
       - labels:
           source:
+          level:
 
   # System logs (syslog)
   - job_name: syslog

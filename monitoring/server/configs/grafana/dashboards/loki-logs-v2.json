@@ -42,7 +42,7 @@
             "type": "loki",
             "uid": "${DS_LOKI}"
           },
-          "expr": "sum by (job) (count_over_time({env=~\"$env\"}[1m]))",
+          "expr": "sum by (job) (count_over_time({env=~\"$env\", job=~\".+\"}[1m]))",
           "refId": "A",
           "legendFormat": "{{job}}"
         }
@@ -265,7 +265,7 @@
             "type": "loki",
             "uid": "${DS_LOKI}"
           },
-          "expr": "sum(count_over_time({env=~\"$env\", job=~\".*(backend|billages-backend).*\", level=\"ERROR\"}[1m]))",
+          "expr": "sum(count_over_time({env=~\"$env\", job=~\".*(backend|billages-backend).*\"} |~ \"(?i)(ERROR|Exception)\" [1m]))",
           "refId": "A",
           "legendFormat": "ERROR"
         },
@@ -274,7 +274,7 @@
             "type": "loki",
             "uid": "${DS_LOKI}"
           },
-          "expr": "sum(count_over_time({env=~\"$env\", job=~\".*(backend|billages-backend).*\", level=\"WARN\"}[1m]))",
+          "expr": "sum(count_over_time({env=~\"$env\", job=~\".*(backend|billages-backend).*\"} |~ \"(?i)\\bWARN\\b\" [1m]))",
           "refId": "B",
           "legendFormat": "WARN"
         }
@@ -347,7 +347,7 @@
             "type": "loki",
             "uid": "${DS_LOKI}"
           },
-          "expr": "sum(count_over_time({env=~\"$env\", job=~\".*(backend|billages-backend).*\", level=\"ERROR\"}[$__range]))",
+          "expr": "sum(count_over_time({env=~\"$env\", job=~\".*(backend|billages-backend).*\"} |~ \"(?i)(ERROR|Exception)\" [$__range]))",
           "refId": "A",
           "legendFormat": "ERROR"
         },
@@ -356,7 +356,7 @@
             "type": "loki",
             "uid": "${DS_LOKI}"
           },
-          "expr": "sum(count_over_time({env=~\"$env\", job=~\".*(backend|billages-backend).*\", level=\"WARN\"}[$__range]))",
+          "expr": "sum(count_over_time({env=~\"$env\", job=~\".*(backend|billages-backend).*\"} |~ \"(?i)\\bWARN\\b\" [$__range]))",
           "refId": "B",
           "legendFormat": "WARN"
         },
@@ -365,7 +365,7 @@
             "type": "loki",
             "uid": "${DS_LOKI}"
           },
-          "expr": "sum(count_over_time({env=~\"$env\", job=~\".*(backend|billages-backend).*\", level=\"INFO\"}[$__range]))",
+          "expr": "sum(count_over_time({env=~\"$env\", job=~\".*(backend|billages-backend).*\"} |~ \"(?i)\\bINFO\\b\" [$__range]))",
           "refId": "C",
           "legendFormat": "INFO"
         }
@@ -409,7 +409,7 @@
             "type": "loki",
             "uid": "${DS_LOKI}"
           },
-          "expr": "{env=~\"$env\", job=~\".*(backend|billages-backend).*\", level=~\"ERROR|WARN\"}",
+          "expr": "{env=~\"$env\", job=~\".*(backend|billages-backend).*\"} |~ \"(?i)(ERROR|WARN|Exception)\"",
           "refId": "A"
         }
       ],
@@ -489,7 +489,7 @@
             "type": "loki",
             "uid": "${DS_LOKI}"
           },
-          "expr": "sum by (job) (count_over_time({env=~\"$env\"}[1m]))",
+          "expr": "sum by (job) (count_over_time({env=~\"$env\", job=~\".+\"}[1m]))",
           "refId": "A",
           "legendFormat": "{{job}}"
         }
@@ -676,7 +676,7 @@
           "type": "loki",
           "uid": "${DS_LOKI}"
         },
-        "query": "label_values({env=~\"$env\"}, job)",
+        "query": "label_values({env=~\"$env\", job=~\".+\"}, job)",
         "sort": 1,
         "refresh": 1,
         "hide": 0,
