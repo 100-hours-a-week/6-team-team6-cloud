@@ -1,0 +1,784 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export KUBECONFIG=/etc/kubernetes/admin.conf
+
+EXPECTED_NODE_COUNT=10
+CLUSTER_NAME="${cluster_name}"
+AWS_REGION="${aws_region}"
+VPC_ID="${vpc_id}"
+CONTROL_PLANE_ENDPOINT="${control_plane_endpoint}"
+PUBLIC_EDGE_HOST="${public_edge_host}"
+CERT_MANAGER_EMAIL="${cert_manager_email}"
+CERT_MANAGER_ACME_SERVER="${cert_manager_acme_server}"
+ALB_CERTIFICATE_ARN="${alb_certificate_arn}"
+CALICO_VERSION="${calico_version}"
+CALICO_BGP_AS_NUMBER="${calico_bgp_as_number}"
+POD_NETWORK_CIDR="${pod_network_cidr}"
+INGRESS_NGINX_CHART_VERSION="${ingress_nginx_chart_version}"
+CERT_MANAGER_CHART_VERSION="${cert_manager_chart_version}"
+AWS_LBC_CHART_VERSION="${aws_lbc_chart_version}"
+LOCAL_NODE_IP="$(hostname -I | awk '{print $1}')"
+
+pin_control_plane_endpoint() {
+  if ! grep -qE "[[:space:]]$${CONTROL_PLANE_ENDPOINT}$" /etc/hosts; then
+    echo "$${LOCAL_NODE_IP} $${CONTROL_PLANE_ENDPOINT}" >> /etc/hosts
+  fi
+}
+
+unpin_control_plane_endpoint() {
+  sed -i.bak "/[[:space:]]$${CONTROL_PLANE_ENDPOINT}$/d" /etc/hosts
+}
+
+trap unpin_control_plane_endpoint EXIT
+pin_control_plane_endpoint
+
+wait_for_api() {
+  until kubectl version --request-timeout=5s >/dev/null 2>&1; do
+    echo "waiting for kube-apiserver"
+    sleep 5
+  done
+}
+
+wait_for_node_count() {
+  until [ "$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')" -ge "$${EXPECTED_NODE_COUNT}" ]; do
+    echo "waiting for $${EXPECTED_NODE_COUNT} joined nodes"
+    sleep 10
+  done
+}
+
+wait_for_nodes_ready() {
+  kubectl wait --for=condition=Ready nodes --all --timeout=20m
+}
+
+install_helm() {
+  if command -v helm >/dev/null 2>&1; then
+    return
+  fi
+
+  curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+}
+
+reconcile_node_placement() {
+  for idx in 01 02 03; do
+    local node_name="$${CLUSTER_NAME}-cp-$${idx}"
+    kubectl label node "$${node_name}" node-role.kubernetes.io/control-plane= node-group=control-plane workload-plane=control-plane --overwrite
+    kubectl taint node "$${node_name}" node-role.kubernetes.io/control-plane=:NoSchedule --overwrite
+  done
+
+  for idx in 01 02 03 04; do
+    local node_name="$${CLUSTER_NAME}-app-$${idx}"
+    kubectl label node "$${node_name}" node-role=app node-group=app workload-plane=app --overwrite
+    kubectl taint node "$${node_name}" workload-plane- >/dev/null 2>&1 || true
+  done
+
+  for idx in 01 02 03; do
+    local node_name="$${CLUSTER_NAME}-data-$${idx}"
+    kubectl label node "$${node_name}" node-role=data node-group=data workload-plane=data --overwrite
+    kubectl taint node "$${node_name}" workload-plane=data:NoSchedule --overwrite
+  done
+}
+
+apply_calico() {
+  kubectl create namespace tigera-operator --dry-run=client -o yaml | kubectl apply -f -
+  kubectl create configmap kubernetes-services-endpoint \
+    -n tigera-operator \
+    --from-literal=KUBERNETES_SERVICE_HOST="$${CONTROL_PLANE_ENDPOINT}" \
+    --from-literal=KUBERNETES_SERVICE_PORT="6443" \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+  curl -fsSL "https://raw.githubusercontent.com/projectcalico/calico/$${CALICO_VERSION}/manifests/tigera-operator.yaml" | kubectl apply -f -
+
+  until kubectl get crd installations.operator.tigera.io >/dev/null 2>&1; do
+    echo "waiting for Calico installation CRD"
+    sleep 5
+  done
+
+  until kubectl get crd bgpconfigurations.crd.projectcalico.org >/dev/null 2>&1; do
+    echo "waiting for Calico BGP configuration CRD"
+    sleep 5
+  done
+
+  cat >/opt/kubeadm/rendered/calico-resources.yaml <<EOF
+apiVersion: operator.tigera.io/v1
+kind: Installation
+metadata:
+  name: default
+spec:
+  calicoNetwork:
+    bgp: Enabled
+    ipPools:
+      - name: default-ipv4-ippool
+        blockSize: 26
+        cidr: $${POD_NETWORK_CIDR}
+        encapsulation: None
+        natOutgoing: Enabled
+        nodeSelector: all()
+---
+apiVersion: crd.projectcalico.org/v1
+kind: BGPConfiguration
+metadata:
+  name: default
+spec:
+  asNumber: $${CALICO_BGP_AS_NUMBER}
+  nodeToNodeMeshEnabled: true
+EOF
+
+  kubectl apply -f /opt/kubeadm/rendered/calico-resources.yaml
+  kubectl rollout status deployment/tigera-operator -n tigera-operator --timeout=10m
+  until kubectl get namespace calico-system >/dev/null 2>&1; do
+    echo "waiting for calico-system namespace"
+    sleep 5
+  done
+  until kubectl get daemonset calico-node -n calico-system >/dev/null 2>&1; do
+    echo "waiting for calico-node daemonset"
+    sleep 5
+  done
+  until kubectl get deployment calico-kube-controllers -n calico-system >/dev/null 2>&1; do
+    echo "waiting for calico-kube-controllers deployment"
+    sleep 5
+  done
+  kubectl rollout status daemonset/calico-node -n calico-system --timeout=15m
+  kubectl rollout status deployment/calico-kube-controllers -n calico-system --timeout=10m
+}
+
+apply_foundation_resources() {
+  cat >/opt/kubeadm/rendered/foundation.yaml <<'EOF'
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: village-app
+  labels:
+    platform.billage.io/boundary: app
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: village-data
+  labels:
+    platform.billage.io/boundary: data
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: village-edge
+  labels:
+    platform.billage.io/boundary: edge
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: village-ops
+  labels:
+    platform.billage.io/boundary: ops
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: village-app-deployer
+  namespace: village-app
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: village-app-deployer
+  namespace: village-app
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "pods", "pods/log", "secrets", "services"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs", "jobs"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: village-app-deployer
+  namespace: village-app
+subjects:
+  - kind: ServiceAccount
+    name: village-app-deployer
+    namespace: village-app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: village-app-deployer
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: village-data-operator
+  namespace: village-data
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: village-data-operator
+  namespace: village-data
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log", "secrets", "services"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: village-data-operator
+  namespace: village-data
+subjects:
+  - kind: ServiceAccount
+    name: village-data-operator
+    namespace: village-data
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: village-data-operator
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: village-edge-operator
+  namespace: village-edge
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: village-edge-operator
+  namespace: village-edge
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "pods", "pods/log", "secrets", "services"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: village-edge-operator
+  namespace: village-edge
+subjects:
+  - kind: ServiceAccount
+    name: village-edge-operator
+    namespace: village-edge
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: village-edge-operator
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: village-ops-operator
+  namespace: village-ops
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: village-ops-operator
+  namespace: village-ops
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "pods", "pods/log", "secrets", "services", "serviceaccounts"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets", "deployments", "statefulsets"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs", "jobs"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: village-ops-operator
+  namespace: village-ops
+subjects:
+  - kind: ServiceAccount
+    name: village-ops-operator
+    namespace: village-ops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: village-ops-operator
+EOF
+
+  kubectl apply -f /opt/kubeadm/rendered/foundation.yaml
+}
+
+install_cert_manager() {
+  helm upgrade --install cert-manager oci://quay.io/jetstack/charts/cert-manager \
+    --version "$${CERT_MANAGER_CHART_VERSION}" \
+    --namespace cert-manager \
+    --create-namespace \
+    --set crds.enabled=true
+
+  kubectl rollout status deployment/cert-manager -n cert-manager --timeout=10m
+  kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=10m
+  kubectl rollout status deployment/cert-manager-cainjector -n cert-manager --timeout=10m
+}
+
+install_ingress_nginx() {
+  helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx --force-update
+  helm repo update ingress-nginx
+
+  helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+    --version "$${INGRESS_NGINX_CHART_VERSION}" \
+    --namespace ingress-nginx \
+    --create-namespace \
+    --set controller.service.type=NodePort \
+    --set controller.service.externalTrafficPolicy=Cluster \
+    --set controller.ingressClassResource.name=nginx \
+    --set controller.ingressClass=nginx \
+    --set controller.watchIngressWithoutClass=false
+
+  kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=10m
+}
+
+install_aws_load_balancer_controller() {
+  helm repo add eks https://aws.github.io/eks-charts --force-update
+  helm repo update eks
+
+  helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+    --version "$${AWS_LBC_CHART_VERSION}" \
+    --namespace kube-system \
+    --set clusterName="$${CLUSTER_NAME}" \
+    --set serviceAccount.create=true \
+    --set region="$${AWS_REGION}" \
+    --set vpcId="$${VPC_ID}"
+
+  kubectl rollout status deployment/aws-load-balancer-controller -n kube-system --timeout=10m
+}
+
+apply_edge_resources() {
+  cat >/opt/kubeadm/rendered/edge-platform.yaml <<EOF
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    email: $${CERT_MANAGER_EMAIL}
+    server: $${CERT_MANAGER_ACME_SERVER}
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: edge-public-tls
+  namespace: village-edge
+spec:
+  secretName: edge-public-tls
+  dnsNames:
+    - $${PUBLIC_EDGE_HOST}
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge-smoketest
+  namespace: village-edge
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: edge-smoketest
+  template:
+    metadata:
+      labels:
+        app: edge-smoketest
+    spec:
+      nodeSelector:
+        workload-plane: app
+      containers:
+        - name: http-echo
+          image: hashicorp/http-echo:1.0.0
+          args: ["-listen=:5678", "-text=village-edge ok"]
+          ports:
+            - containerPort: 5678
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edge-smoketest
+  namespace: village-edge
+spec:
+  selector:
+    app: edge-smoketest
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: edge-smoketest
+  namespace: village-edge
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - $${PUBLIC_EDGE_HOST}
+      secretName: edge-public-tls
+  rules:
+    - host: $${PUBLIC_EDGE_HOST}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: edge-smoketest
+                port:
+                  number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-nginx-public-alb
+  namespace: ingress-nginx
+  annotations:
+    alb.ingress.kubernetes.io/backend-protocol: HTTPS
+    alb.ingress.kubernetes.io/certificate-arn: $${ALB_CERTIFICATE_ARN}
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/success-codes: "200-404"
+    alb.ingress.kubernetes.io/target-type: instance
+spec:
+  ingressClassName: alb
+  rules:
+    - host: $${PUBLIC_EDGE_HOST}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ingress-nginx-controller
+                port:
+                  number: 443
+EOF
+
+  kubectl apply -f /opt/kubeadm/rendered/edge-platform.yaml
+}
+
+apply_network_policies() {
+  cat >/opt/kubeadm/rendered/network-policies.yaml <<'EOF'
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: village-app
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: village-data
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: village-edge
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: village-ops
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: village-app
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: village-data
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: village-edge
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: village-ops
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-from-edge
+  namespace: village-app
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: village-edge
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 3000
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-to-data
+  namespace: village-app
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: village-data
+      ports:
+        - protocol: TCP
+          port: 5672
+        - protocol: TCP
+          port: 15672
+        - protocol: TCP
+          port: 6333
+        - protocol: TCP
+          port: 6334
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-data-intra-namespace
+  namespace: village-data
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-data-from-app-and-ops
+  namespace: village-data
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: village-app
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: village-ops
+      ports:
+        - protocol: TCP
+          port: 5672
+        - protocol: TCP
+          port: 15672
+        - protocol: TCP
+          port: 6333
+        - protocol: TCP
+          port: 6334
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-edge-from-ingress-nginx
+  namespace: village-edge
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 8089
+        - protocol: TCP
+          port: 5678
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ops-egress-https
+  namespace: village-ops
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+EOF
+
+  kubectl apply -f /opt/kubeadm/rendered/network-policies.yaml
+}
+
+main() {
+  if [ ! -f /etc/kubernetes/admin.conf ]; then
+    echo "admin kubeconfig not found; run control-plane-init.sh first" >&2
+    exit 1
+  fi
+
+  wait_for_api
+  wait_for_node_count
+  install_helm
+  reconcile_node_placement
+  apply_calico
+  wait_for_nodes_ready
+  apply_foundation_resources
+  install_cert_manager
+  install_ingress_nginx
+  install_aws_load_balancer_controller
+  apply_edge_resources
+  apply_network_policies
+
+  kubectl get nodes -L node-group,workload-plane
+  kubectl get pods -n calico-system
+  kubectl get ingress -n ingress-nginx ingress-nginx-public-alb -o wide || true
+
+  echo "public ALB hostname:"
+  kubectl get ingress -n ingress-nginx ingress-nginx-public-alb -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' || true
+  echo
+}
+
+main "$@"

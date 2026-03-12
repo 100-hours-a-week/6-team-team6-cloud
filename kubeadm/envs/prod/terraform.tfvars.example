@@ -1,0 +1,24 @@
+vpc_cidr = "10.30.0.0/16"
+
+management_cidrs = [
+  "10.2.0.0/16",
+]
+
+enable_ssh = false
+ssh_allowed_cidrs = []
+key_name = null
+
+private_dns_zone_name      = "village.internal"
+kube_apiserver_record_name = "k8s-api"
+public_edge_host           = "edge.example.com"
+cert_manager_email         = "platform@example.com"
+alb_certificate_arn        = "arn:aws:acm:ap-northeast-2:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+
+kubernetes_version       = "v1.28.0"
+kubernetes_minor_version = "v1.28"
+pod_network_cidr         = "192.168.0.0/16"
+service_cidr             = "10.96.0.0/12"
+cluster_dns_ip           = "10.96.0.10"
+cert_manager_acme_server = "https://acme-v02.api.letsencrypt.org/directory"
+calico_version           = "v3.31.0"
+calico_bgp_as_number     = 64512

@@ -1,0 +1,29 @@
+#cloud-config
+hostname: ${node_hostname}
+fqdn: ${node_hostname}.${private_dns_zone_name}
+manage_etc_hosts: true
+
+write_files:
+  - path: /opt/kubeadm/bin/bootstrap-common.sh
+    owner: root:root
+    permissions: "0755"
+    content: |
+      ${replace(trimspace(bootstrap_common_script), "\n", "\n      ")}
+  - path: /opt/kubeadm/bin/control-plane-join.sh
+    owner: root:root
+    permissions: "0755"
+    content: |
+      ${replace(trimspace(control_plane_join_script), "\n", "\n      ")}
+  - path: /opt/kubeadm/bin/write-join-env.sh
+    owner: root:root
+    permissions: "0755"
+    content: |
+      ${replace(trimspace(write_join_env_script), "\n", "\n      ")}
+  - path: /opt/kubeadm/templates/kubeadm-join-control-plane.yaml.tpl
+    owner: root:root
+    permissions: "0644"
+    content: |
+      ${replace(trimspace(kubeadm_join_control_plane_config), "\n", "\n      ")}
+
+runcmd:
+  - [bash, -lc, "/opt/kubeadm/bin/bootstrap-common.sh"]

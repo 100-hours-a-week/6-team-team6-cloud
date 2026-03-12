@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euxo pipefail
+
+if [ -f /etc/kubernetes/admin.conf ]; then
+  echo "control-plane is already initialized"
+  exit 0
+fi
+
+INIT_CONFIG_PATH="/opt/kubeadm/templates/kubeadm-init.yaml"
+JOIN_ENV_PATH="/opt/kubeadm/rendered/cluster-join.env"
+NODE_IP="$(hostname -I | awk '{print $1}')"
+
+sed -i.bak '/[[:space:]]${control_plane_endpoint}$/d' /etc/hosts
+echo "$${NODE_IP} ${control_plane_endpoint}" >> /etc/hosts
+
+kubeadm init --config "$${INIT_CONFIG_PATH}" | tee /opt/kubeadm/logs/kubeadm-init.log
+
+mkdir -p /root/.kube
+cp /etc/kubernetes/admin.conf /root/.kube/config
+chmod 600 /root/.kube/config
+
+BOOTSTRAP_TOKEN="$(kubeadm token create)"
+CERTIFICATE_KEY="$(kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -n 1 | tr -d '\r')"
+CA_CERT_HASH="$(openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt \
+  | openssl pkey -pubin -outform der 2>/dev/null \
+  | openssl dgst -sha256 -hex \
+  | awk '{print $2}')"
+
+cat >"$${JOIN_ENV_PATH}" <<EOF
+BOOTSTRAP_TOKEN=$${BOOTSTRAP_TOKEN}
+CA_CERT_HASH=$${CA_CERT_HASH}
+CERTIFICATE_KEY=$${CERTIFICATE_KEY}
+CONTROL_PLANE_ENDPOINT=${control_plane_endpoint}
+EOF
+
+echo "join materials written to $${JOIN_ENV_PATH}"

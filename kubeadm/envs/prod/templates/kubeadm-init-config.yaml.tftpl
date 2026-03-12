@@ -1,0 +1,50 @@
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: ${advertise_address}
+  bindPort: 6443
+nodeRegistration:
+  criSocket: unix:///run/containerd/containerd.sock
+  name: ${node_name}
+%{ if length(node_taints) > 0 ~}
+  taints:
+%{ for taint in node_taints ~}
+    - key: ${taint.key}
+      value: "${taint.value}"
+      effect: ${taint.effect}
+%{ endfor ~}
+%{ endif ~}
+  kubeletExtraArgs:
+    node-ip: ${advertise_address}
+    resolv-conf: /run/systemd/resolve/resolv.conf
+    node-labels: ${node_labels}
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+clusterName: ${cluster_name}
+kubernetesVersion: ${kubernetes_version}
+controlPlaneEndpoint: ${control_plane_endpoint}:6443
+networking:
+  podSubnet: ${pod_network_cidr}
+  serviceSubnet: ${service_cidr}
+apiServer:
+  certSANs:
+    - ${control_plane_endpoint}
+    - ${advertise_address}
+controllerManager:
+  extraArgs:
+    bind-address: 0.0.0.0
+scheduler:
+  extraArgs:
+    bind-address: 0.0.0.0
+etcd:
+  local:
+    dataDir: /var/lib/etcd
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+containerRuntimeEndpoint: unix:///run/containerd/containerd.sock
+failSwapOn: false
+clusterDNS:
+  - ${cluster_dns_ip}

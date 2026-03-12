@@ -1,0 +1,23 @@
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: ${control_plane_endpoint}:6443
+    token: __BOOTSTRAP_TOKEN__
+    caCertHashes:
+      - sha256:__CA_CERT_HASH__
+nodeRegistration:
+  criSocket: unix:///run/containerd/containerd.sock
+  name: __NODE_NAME__
+%{ if length(node_taints) > 0 ~}
+  taints:
+%{ for taint in node_taints ~}
+    - key: ${taint.key}
+      value: "${taint.value}"
+      effect: ${taint.effect}
+%{ endfor ~}
+%{ endif ~}
+  kubeletExtraArgs:
+    node-ip: __NODE_IP__
+    resolv-conf: /run/systemd/resolve/resolv.conf
+    node-labels: ${node_labels}
