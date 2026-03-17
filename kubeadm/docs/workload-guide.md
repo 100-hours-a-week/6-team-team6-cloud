@@ -6,33 +6,22 @@
 
 ## 1. 클러스터 접근 (kubeconfig)
 
-### kubeconfig 로컬로 가져오기
+### cp-01에 SSM 접속 후 kubectl 사용
 
 ```bash
-# 1. cp-01 인스턴스 ID 확인
 cd kubeadm/envs/prod
 CP01=$(terraform output -json control_plane_instance_ids | jq -r '."cp-01"')
 
-# 2. kubeconfig 내용 출력
-aws ssm start-session \
-  --target "$CP01" \
-  --region ap-northeast-2 \
-  --document-name AWS-StartNonInteractiveCommand \
-  --parameters '{"command":["sudo cat /root/.kube/config"]}'
-
-# 또는 SSM 직접 접속 후 복사
 aws ssm start-session --target "$CP01" --region ap-northeast-2
-# 접속 후:
-# sudo cat /root/.kube/config
 ```
 
-로컬 `~/.kube/config`에 붙여넣은 뒤 server 주소를 NLB DNS로 교체한다:
+접속 후:
 ```bash
-# terraform output으로 NLB DNS 확인
-terraform output kube_apiserver_nlb_dns_name
+sudo -i
+kubectl get nodes
 ```
 
-> NLB는 VPC 내부 전용이라 로컬에서 직접 접근 불가. **bastion이나 VPN이 있어야** kubectl을 로컬에서 쓸 수 있다. 없으면 cp-01에 SSM 접속 후 `sudo -i && kubectl` 명령 사용.
+> 인스턴스 ID를 모를 때는 [ssm-connect.md](./ssm-connect.md) 참고.
 
 ---
 
@@ -157,6 +146,41 @@ volumeClaimTemplates:
 ---
 
 ## 4. 주요 workload 배포 패턴
+
+### Service
+
+모든 Deployment/StatefulSet에 대응하는 Service가 필요하다.
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: spring-app-svc
+  namespace: billage-app
+spec:
+  selector:
+    app: spring-app
+  ports:
+    - port: 8080
+      targetPort: 8080
+```
+
+StatefulSet headless Service (RabbitMQ/Qdrant DNS 기반 클러스터링에 필수):
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-headless
+  namespace: billage-data
+spec:
+  clusterIP: None
+  selector:
+    app: rabbitmq
+  ports:
+    - port: 5672
+```
+
+---
 
 ### Deployment (Spring Boot / Next.js / FastAPI)
 
@@ -387,11 +411,17 @@ helm upgrade --install argocd argo/argo-cd \
   --wait --timeout 300s
 ```
 
-> ArgoCD는 ingress-nginx를 통해 외부에 노출하거나, SSM port-forward로 접근:
-> ```bash
-> # cp-01에서
-> kubectl port-forward svc/argocd-server -n billage-ops 8080:443
-> ```
+초기 admin 비밀번호 확인:
+```bash
+kubectl get secret argocd-initial-admin-secret -n billage-ops \
+  -o jsonpath="{.data.password}" | base64 -d && echo
+```
+
+UI 접근 (cp-01에서 port-forward):
+```bash
+kubectl port-forward svc/argocd-server -n billage-ops 8080:443
+# 브라우저: https://localhost:8080  (인증서 경고 무시)
+```
 
 ### ArgoCD Application 구성
 
@@ -462,6 +492,28 @@ helm upgrade --install loki grafana/loki-stack \
 ```
 
 > `billage-ops` 네임스페이스는 `allow-ops-egress-https` NetworkPolicy로 외부 HTTPS 통신이 허용되어 있다.
+
+Prometheus가 `billage-app`, `billage-data` 등 다른 네임스페이스의 메트릭을 수집하려면 NetworkPolicy를 추가해야 한다:
+
+```yaml
+# billage-app에서 Prometheus 스크래핑 허용
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: billage-app
+spec:
+  podSelector: {}
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: billage-ops
+      ports:
+        - port: 8080   # 앱 메트릭 포트로 변경
+```
+
+`billage-data`에도 동일하게 적용한다.
 
 ---
 
