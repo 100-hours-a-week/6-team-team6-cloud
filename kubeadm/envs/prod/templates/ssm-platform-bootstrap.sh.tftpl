@@ -8,6 +8,7 @@ CLUSTER_NAME="${cluster_name}"
 AWS_REGION="${aws_region}"
 VPC_ID="${vpc_id}"
 CONTROL_PLANE_ENDPOINT="${control_plane_endpoint}"
+CALICO_KUBERNETES_SERVICE_HOST="${calico_kubernetes_service_host}"
 PUBLIC_EDGE_HOST="${public_edge_host}"
 CERT_MANAGER_EMAIL="${cert_manager_email}"
 CERT_MANAGER_ACME_SERVER="${cert_manager_acme_server}"
@@ -21,22 +22,37 @@ AWS_LBC_CHART_VERSION="${aws_lbc_chart_version}"
 LOCAL_NODE_IP="$(hostname -I | awk '{print $1}')"
 
 pin_control_plane_endpoint() {
-  if ! grep -qE "[[:space:]]$${CONTROL_PLANE_ENDPOINT}$" /etc/hosts; then
-    echo "$${LOCAL_NODE_IP} $${CONTROL_PLANE_ENDPOINT}" >> /etc/hosts
-  fi
-}
-
-unpin_control_plane_endpoint() {
   sed -i.bak "/[[:space:]]$${CONTROL_PLANE_ENDPOINT}$/d" /etc/hosts
+  echo "$${LOCAL_NODE_IP} $${CONTROL_PLANE_ENDPOINT}" >> /etc/hosts
 }
 
-trap unpin_control_plane_endpoint EXIT
 pin_control_plane_endpoint
 
 wait_for_api() {
   until kubectl version --request-timeout=5s >/dev/null 2>&1; do
     echo "waiting for kube-apiserver"
     sleep 5
+  done
+}
+
+wait_for_local_control_plane_stability() {
+  local consecutive_ok=0
+  local readyz_output
+
+  while [ "$${consecutive_ok}" -lt 3 ]; do
+    readyz_output="$$(curl -ks https://127.0.0.1:6443/readyz?verbose 2>/dev/null || true)"
+
+    if printf '%s\n' "$${readyz_output}" | grep -q '^\[+\]etcd ok' \
+      && printf '%s\n' "$${readyz_output}" | grep -q '^\[+\]etcd-readiness ok'; then
+      consecutive_ok="$$(($${consecutive_ok} + 1))"
+    else
+      consecutive_ok=0
+    fi
+
+    if [ "$${consecutive_ok}" -lt 3 ]; then
+      echo "waiting for local control-plane stability"
+      sleep 5
+    fi
   done
 }
 
@@ -83,7 +99,7 @@ apply_calico() {
   kubectl create namespace tigera-operator --dry-run=client -o yaml | kubectl apply -f -
   kubectl create configmap kubernetes-services-endpoint \
     -n tigera-operator \
-    --from-literal=KUBERNETES_SERVICE_HOST="$${CONTROL_PLANE_ENDPOINT}" \
+    --from-literal=KUBERNETES_SERVICE_HOST="$${CALICO_KUBERNETES_SERVICE_HOST}" \
     --from-literal=KUBERNETES_SERVICE_PORT="6443" \
     --dry-run=client -o yaml | kubectl apply -f -
 
@@ -138,6 +154,28 @@ EOF
     echo "waiting for calico-kube-controllers deployment"
     sleep 5
   done
+  until kubectl get deployment calico-typha -n calico-system >/dev/null 2>&1; do
+    echo "waiting for calico-typha deployment"
+    sleep 5
+  done
+  kubectl set env daemonset/calico-node -n calico-system \
+    KUBERNETES_SERVICE_HOST="$${CALICO_KUBERNETES_SERVICE_HOST}" \
+    KUBERNETES_SERVICE_PORT="6443"
+  kubectl set env deployment/calico-kube-controllers -n calico-system \
+    KUBERNETES_SERVICE_HOST="$${CALICO_KUBERNETES_SERVICE_HOST}" \
+    KUBERNETES_SERVICE_PORT="6443"
+  kubectl set env deployment/calico-typha -n calico-system \
+    KUBERNETES_SERVICE_HOST="$${CALICO_KUBERNETES_SERVICE_HOST}" \
+    KUBERNETES_SERVICE_PORT="6443"
+  kubectl set env daemonset/csi-node-driver -n calico-system \
+    KUBERNETES_SERVICE_HOST="$${CALICO_KUBERNETES_SERVICE_HOST}" \
+    KUBERNETES_SERVICE_PORT="6443"
+  kubectl rollout restart daemonset/calico-node -n calico-system
+  kubectl rollout restart daemonset/csi-node-driver -n calico-system
+  kubectl rollout restart deployment/calico-kube-controllers -n calico-system
+  kubectl rollout restart deployment/calico-typha -n calico-system
+  kubectl rollout status deployment/calico-typha -n calico-system --timeout=10m
+  kubectl rollout status daemonset/csi-node-driver -n calico-system --timeout=15m
   kubectl rollout status daemonset/calico-node -n calico-system --timeout=15m
   kubectl rollout status deployment/calico-kube-controllers -n calico-system --timeout=10m
 }
@@ -147,42 +185,42 @@ apply_foundation_resources() {
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: village-app
+  name: billage-app
   labels:
     platform.billage.io/boundary: app
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: village-data
+  name: billage-data
   labels:
     platform.billage.io/boundary: data
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: village-edge
+  name: billage-edge
   labels:
     platform.billage.io/boundary: edge
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: village-ops
+  name: billage-ops
   labels:
     platform.billage.io/boundary: ops
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: village-app-deployer
-  namespace: village-app
+  name: billage-app-deployer
+  namespace: billage-app
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: village-app-deployer
-  namespace: village-app
+  name: billage-app-deployer
+  namespace: billage-app
 rules:
   - apiGroups: [""]
     resources: ["configmaps", "pods", "pods/log", "secrets", "services"]
@@ -203,28 +241,28 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: village-app-deployer
-  namespace: village-app
+  name: billage-app-deployer
+  namespace: billage-app
 subjects:
   - kind: ServiceAccount
-    name: village-app-deployer
-    namespace: village-app
+    name: billage-app-deployer
+    namespace: billage-app
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: village-app-deployer
+  name: billage-app-deployer
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: village-data-operator
-  namespace: village-data
+  name: billage-data-operator
+  namespace: billage-data
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: village-data-operator
-  namespace: village-data
+  name: billage-data-operator
+  namespace: billage-data
 rules:
   - apiGroups: [""]
     resources: ["configmaps", "persistentvolumeclaims", "pods", "pods/log", "secrets", "services"]
@@ -239,28 +277,28 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: village-data-operator
-  namespace: village-data
+  name: billage-data-operator
+  namespace: billage-data
 subjects:
   - kind: ServiceAccount
-    name: village-data-operator
-    namespace: village-data
+    name: billage-data-operator
+    namespace: billage-data
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: village-data-operator
+  name: billage-data-operator
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: village-edge-operator
-  namespace: village-edge
+  name: billage-edge-operator
+  namespace: billage-edge
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: village-edge-operator
-  namespace: village-edge
+  name: billage-edge-operator
+  namespace: billage-edge
 rules:
   - apiGroups: [""]
     resources: ["configmaps", "pods", "pods/log", "secrets", "services"]
@@ -275,28 +313,28 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: village-edge-operator
-  namespace: village-edge
+  name: billage-edge-operator
+  namespace: billage-edge
 subjects:
   - kind: ServiceAccount
-    name: village-edge-operator
-    namespace: village-edge
+    name: billage-edge-operator
+    namespace: billage-edge
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: village-edge-operator
+  name: billage-edge-operator
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: village-ops-operator
-  namespace: village-ops
+  name: billage-ops-operator
+  namespace: billage-ops
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: village-ops-operator
-  namespace: village-ops
+  name: billage-ops-operator
+  namespace: billage-ops
 rules:
   - apiGroups: [""]
     resources: ["configmaps", "pods", "pods/log", "secrets", "services", "serviceaccounts"]
@@ -314,16 +352,16 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: village-ops-operator
-  namespace: village-ops
+  name: billage-ops-operator
+  namespace: billage-ops
 subjects:
   - kind: ServiceAccount
-    name: village-ops-operator
-    namespace: village-ops
+    name: billage-ops-operator
+    namespace: billage-ops
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: village-ops-operator
+  name: billage-ops-operator
 EOF
 
   kubectl apply -f /opt/kubeadm/rendered/foundation.yaml
@@ -394,7 +432,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: edge-public-tls
-  namespace: village-edge
+  namespace: billage-edge
 spec:
   secretName: edge-public-tls
   dnsNames:
@@ -408,7 +446,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: edge-smoketest
-  namespace: village-edge
+  namespace: billage-edge
 spec:
   replicas: 2
   selector:
@@ -424,7 +462,7 @@ spec:
       containers:
         - name: http-echo
           image: hashicorp/http-echo:1.0.0
-          args: ["-listen=:5678", "-text=village-edge ok"]
+          args: ["-listen=:5678", "-text=billage-edge ok"]
           ports:
             - containerPort: 5678
               name: http
@@ -441,7 +479,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: edge-smoketest
-  namespace: village-edge
+  namespace: billage-edge
 spec:
   selector:
     app: edge-smoketest
@@ -454,7 +492,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: edge-smoketest
-  namespace: village-edge
+  namespace: billage-edge
 spec:
   ingressClassName: nginx
   tls:
@@ -510,7 +548,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: default-deny-all
-  namespace: village-app
+  namespace: billage-app
 spec:
   podSelector: {}
   policyTypes: ["Ingress", "Egress"]
@@ -519,7 +557,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: default-deny-all
-  namespace: village-data
+  namespace: billage-data
 spec:
   podSelector: {}
   policyTypes: ["Ingress", "Egress"]
@@ -528,7 +566,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: default-deny-all
-  namespace: village-edge
+  namespace: billage-edge
 spec:
   podSelector: {}
   policyTypes: ["Ingress", "Egress"]
@@ -537,7 +575,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: default-deny-all
-  namespace: village-ops
+  namespace: billage-ops
 spec:
   podSelector: {}
   policyTypes: ["Ingress", "Egress"]
@@ -546,7 +584,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-dns-egress
-  namespace: village-app
+  namespace: billage-app
 spec:
   podSelector: {}
   policyTypes: ["Egress"]
@@ -565,7 +603,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-dns-egress
-  namespace: village-data
+  namespace: billage-data
 spec:
   podSelector: {}
   policyTypes: ["Egress"]
@@ -584,7 +622,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-dns-egress
-  namespace: village-edge
+  namespace: billage-edge
 spec:
   podSelector: {}
   policyTypes: ["Egress"]
@@ -603,7 +641,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-dns-egress
-  namespace: village-ops
+  namespace: billage-ops
 spec:
   podSelector: {}
   policyTypes: ["Egress"]
@@ -622,7 +660,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-app-from-edge
-  namespace: village-app
+  namespace: billage-app
 spec:
   podSelector: {}
   policyTypes: ["Ingress"]
@@ -630,7 +668,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: village-edge
+              kubernetes.io/metadata.name: billage-edge
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: ingress-nginx
@@ -650,7 +688,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-app-to-data
-  namespace: village-app
+  namespace: billage-app
 spec:
   podSelector: {}
   policyTypes: ["Egress"]
@@ -658,7 +696,7 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: village-data
+              kubernetes.io/metadata.name: billage-data
       ports:
         - protocol: TCP
           port: 5672
@@ -673,7 +711,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-data-intra-namespace
-  namespace: village-data
+  namespace: billage-data
 spec:
   podSelector: {}
   policyTypes: ["Ingress", "Egress"]
@@ -688,7 +726,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-data-from-app-and-ops
-  namespace: village-data
+  namespace: billage-data
 spec:
   podSelector: {}
   policyTypes: ["Ingress"]
@@ -696,10 +734,10 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: village-app
+              kubernetes.io/metadata.name: billage-app
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: village-ops
+              kubernetes.io/metadata.name: billage-ops
       ports:
         - protocol: TCP
           port: 5672
@@ -714,7 +752,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-edge-from-ingress-nginx
-  namespace: village-edge
+  namespace: billage-edge
 spec:
   podSelector: {}
   policyTypes: ["Ingress"]
@@ -737,7 +775,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-ops-egress-https
-  namespace: village-ops
+  namespace: billage-ops
 spec:
   podSelector: {}
   policyTypes: ["Egress"]
@@ -761,9 +799,11 @@ main() {
 
   wait_for_api
   wait_for_node_count
+  wait_for_local_control_plane_stability
   install_helm
   reconcile_node_placement
   apply_calico
+  wait_for_local_control_plane_stability
   wait_for_nodes_ready
   apply_foundation_resources
   install_cert_manager

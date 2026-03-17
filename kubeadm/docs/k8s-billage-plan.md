@@ -1,20 +1,157 @@
+# Kubeadm 오케스트레이션 설계
+
 ## 근본 목적
 
-kubeadm 기반 AWS 클러스터의 구조와 운영 경계를 문서로 먼저 고정해, 인프라와 플랫폼 자산을 재현 가능하게 만들고 장애 시 원인 추적 시간을 줄인다.
+- MAU 100만명 규모 서비스를 위해 kubeadm 기반 자체 관리 Kubernetes 클러스터 설계 결정을 기록한다.
+- 인프라 구성, 네트워크, 노드 배치, 플랫폼 컴포넌트 선택의 근거를 고정해 이후 운영자가 같은 결정을 반복 검토하지 않도록 한다.
 
 ## 비목적
 
-이 문서는 애플리케이션 배포 절차나 개별 장애 복구 런북 전체를 대체하지 않으며, 모든 운영 상황의 즉시 해결책을 제공하는 것을 목표로 하지 않는다.
+- 실제 구축 절차(runbook)를 이 문서에서 기술하지 않는다.
+- 개별 컴포넌트의 상세 운영 방법을 여기서 다루지 않는다.
+
+---
+
+## 1. Kubernetes 도입
+
+### 1.1 4단계 Docker Compose의 한계
+
+4단계 Docker Compose 아키텍처는 MAU 30만명(피크 동접 18,000명)까지 성공적으로 서비스를 운영했습니다. 그러나 서비스가 수도권을 넘어 전국으로 확장되면서 다음과 같은 운영상의 한계에 직면했습니다.
+
+| 문제 영역 | 4단계 한계 | 영향 |
+| --- | --- | --- |
+| **스케일링 속도** | 수동 인스턴스 추가 → 20~30분 소요 | 피크 트래픽 대응 지연, 사용자 이탈 |
+| **리소스 효율성** | 서비스별 EC2 인스턴스 고정 할당 | 유휴 리소스 발생, 비용 낭비 |
+| **배포 복잡도** | 6개 서비스 × 2~3대 = 최대 18대 개별 관리 | 배포 시간 증가, 휴먼 에러 가능성 |
+| **장애 복구** | 수동 인스턴스 재시작 → 5~10분 | 서비스 가용성 저하 |
+| **서비스 디스커버리** | Nginx 설정 수동 변경 | 동적 스케일링 제한 |
+
+### 1.2 트래픽 산정: MAU 100만명 기준
+
+당근마켓의 성장 패턴(2018년 기준 +3년)을 벤치마킹하여 목표 트래픽을 산정했습니다.
+
+| 지표 | 산정 근거 | 예상 값 |
+| --- | --- | --- |
+| MAU | 당근마켓 +3년 기준 (2018년) | 1,000,000명 |
+| DAU | MAU의 20% (필요 시 사용하는 서비스 특성) | 200,000명 |
+| 피크 동시접속 | DAU의 30% (점심/퇴근 시간대 집중) | 60,000명 |
+| 스파이크 | 피크의 2배 (이벤트, 바이럴 시) | ~120,000명 |
+
+**요청량 산정 (RPS)**
+
+동시접속 60,000명 기준:
+
+- 평균 체류 시간: 5분
+- 분당 요청 수: 3회 (페이지 이동, API 호출)
+- **초당 요청(RPS): 60,000 × 3 / 60 = 3,000 RPS**
+
+스파이크 시 (동시접속 120,000명):
+
+- **초당 요청(RPS): 120,000 × 3 / 60 = 6,000 RPS**
+
+### 1.3 4단계 대비 트래픽 증가
+
+| 지표 | 4단계 (Docker) | 5단계 (Kubeadm) |
+| --- | --- | --- |
+| MAU | 30만명 | 100만명 |
+| DAU | 6만명 | 20만명 |
+| 피크 동접 | 18,000명 | 60,000명 |
+| 피크 RPS | 900 RPS | 3,000 RPS |
+| 스파이크 RPS | 1,800 RPS | 6,000 RPS |
+
+### 1.4 성능 목표
+
+| 항목 | 목표 | 근거 |
+| --- | --- | --- |
+| 응답시간 (p95) | < 300ms | 사용자 체감 성능 향상 |
+| 가용성 | 99.9% | 월 ~43분 다운타임 허용 |
+| 피크 RPS | 3,000 | 동접 60,000명 기준 |
+| 스파이크 RPS | 6,000 | 동접 120,000명 기준 |
+
+---
+
+## 2. Kubeadm 도입 이유 및 기대 효과
+
+### 2.1 왜 Kubeadm인가? (vs EKS/GKE)
+
+| 비교 항목 | Kubeadm (Self-managed) | EKS (AWS Managed) |
+| --- | --- | --- |
+| **컨트롤 플레인 비용** | EC2 비용만 (월 ~10만원) | 클러스터당 월 $73 (~10만원) + EC2 |
+| **커스터마이징** | 완전한 제어 (CNI, 스토리지, 인증) | AWS 정책 내 제한적 |
+| **학습 가치** | Kubernetes 내부 구조 이해 | 추상화된 관리 |
+| **운영 부담** | 높음 (컨트롤 플레인 관리 필요) | 낮음 (AWS가 관리) |
+| **장애 복구** | 수동 대응 필요 | 자동 복구 |
+
+#### 본 설계에서의 선택: Kubeadm
+
+본 프로젝트에서는 EKS가 아닌 Kubeadm으로 클러스터를 직접 구성합니다. 그 이유는 다음 두 가지입니다.
+
+**첫째, Kubernetes 내부 동작 원리를 직접 경험하기 위해서입니다.**
+
+EKS는 Control Plane을 AWS가 관리하기 때문에 사용자 입장에서는 블랙박스입니다. Kubeadm으로 직접 구성하면 다음을 실제로 경험할 수 있습니다:
+
+- API Server가 요청을 어떻게 인증/인가하는지
+- etcd에 클러스터 상태가 어떻게 저장되는지
+- Scheduler가 Pod를 어떤 기준으로 노드에 배치하는지
+- Controller Manager가 Desired State와 Current State를 어떻게 reconcile하는지
+- CNI(Calico)가 Pod 네트워크를 어떻게 구성하는지
+- 인증서 체계(PKI)가 컴포넌트 간 통신을 어떻게 보호하는지
+
+이러한 이해과정을 직접 경험 하며 장애 상황에서 문제의 레이어를 빠르게 판별할 수 있습니다.
+
+**둘째, EKS Control Plane 비용을 절감합니다.**
+
+| 항목 | Kubeadm | EKS |
+| --- | --- | --- |
+| Control Plane 비용 | Master EC2 비용만 (t3.medium: 월 ~5.5만원) | 클러스터당 월 $73 (~10만원) + Worker EC2 |
+| 월 차이 | - | 약 4.5만원 추가 |
+
+#### 실무 환경이라면: EKS
+
+실제 프로덕션 서비스라면 EKS를 선택할 것입니다.
+
+| 관점 | Kubeadm의 한계 | EKS의 이점 |
+| --- | --- | --- |
+| **Control Plane 가용성** | Master 단일 장애점(SPOF), 장애 시 수동 복구 5~30분 | AWS 관리형 HA, 자동 복구, 99.95% SLA |
+| **etcd 관리** | 백업/복구를 직접 운영, 데이터 손실 리스크 | AWS가 자동 관리 |
+| **K8s 버전 업그레이드** | kubeadm upgrade 직접 실행, 실패 시 롤백 어려움 | 콘솔 클릭 또는 API 호출로 관리형 업그레이드 |
+| **인증서 관리** | 수동 갱신 필요 (1년 만료), 누락 시 클러스터 중단 | AWS가 자동 관리 |
+| **운영 인력** | 인프라 전담 인력 필요 | DevOps 팀이 워크로드에 집중 가능 |
+
+MAU 100만, 피크 동접 60,000명 규모에서 Master HA(3대)를 구성하면 EKS 대비 오히려 비용이 비싸지며 etcd 장애로 클러스터 전체 상태를 잃는 리스크는 비즈니스에 치명적입니다.
+
+| 구분 | 선택 | 이유 |
+| --- | --- | --- |
+| **본 설계** | Kubeadm | K8s 내부 구조 직접 경험, Control Plane 비용 절감 |
+| **실무 전환 시** | EKS | Control Plane HA 보장, 운영 부담 감소, AWS 생태계 통합 |
+
+### 2.2 Kubeadm 도입으로 해결되는 문제
+
+| 4단계 문제 | Kubeadm 솔루션 | 기대 효과 |
+| --- | --- | --- |
+| 수동 스케일링 (20~30분) | HPA 자동 스케일링 | **2~3분 내 Pod 확장** |
+| 고정 리소스 할당 | Pod 단위 동적 배치 | **리소스 효율 40% 향상** |
+| 개별 서버 관리 (18대) | 선언적 배포 (kubectl apply) | **배포 복잡도 80% 감소** |
+| 수동 장애 복구 (5~10분) | Self-healing (자동 재시작) | **MTTR 1분 이내** |
+| 수동 서비스 디스커버리 | Kubernetes Service/DNS | **동적 엔드포인트 관리** |
+
+### 2.3 기대 효과 정량화
+
+| 지표 | 4단계 (Docker) | 5단계 (Kubeadm) | 개선율 |
+| --- | --- | --- | --- |
+| 스케일링 시간 | 20~30분 | 2~3분 | **90% 단축** |
+| 배포 시간 | 15분/서비스 | 3분/전체 | **80% 단축** |
+| 장애 복구 시간 (MTTR) | 5~10분 | < 1분 | **90% 단축** |
+| 리소스 활용률 | 50~60% | 70~80% | **30% 향상** |
+| 인프라 비용 (월) | 약 150만원 | 약 120만원 | **20% 절감** |
+
+---
 
 ## 3. 클러스터 아키텍처 설계
 
 ### 3.1 빌리지 서비스 구조
-
-우리 서비스는 MSA가 아니다. Spring Boot 모놀리스가 물품 CRUD, 그룹 관리, 인증, 채팅(WebSocket), 알림(WebSocket)을 모두 처리한다. 별도 마이크로서비스로 분리된 것은 Next.js(프론트엔드 SSR/CSR)와 FastAPI(AI 오케스트레이션)뿐이다.
-
-```
 [빌리지 서비스 구조 — 멀티모달 모놀리스]
-
+```
 ├── Next.js (Web Server)
 │   └── 프론트엔드 SSR/CSR, 정적 자산 서빙
 │
@@ -41,7 +178,8 @@ kubeadm 기반 AWS 클러스터의 구조와 운영 경계를 문서로 먼저 �
 
 ### 3.2 워크로드 성격 분류
 
-여기서 중요한 관점이 하나 있다. **같이 죽어도 되는 것끼리 묶고, 같이 죽으면 안 되는 것은 분리한다.** 진짜 경계는 서비스 이름이 아니라, **stateless request-serving plane**과 **stateful memory-sensitive plane**이다.
+**같이 죽어도 되는 것끼리 묶고, 같이 죽으면 안 되는 것은 분리한다.** 
+(stateless와 stateful 로 분리한다)
 
 | 컴포넌트 | 성격 | 스케일 방식 | 실패 시 영향 | 메모리 특성 |
 | --- | --- | --- | --- | --- |
@@ -51,25 +189,23 @@ kubeadm 기반 AWS 클러스터의 구조와 운영 경계를 문서로 먼저 �
 | RabbitMQ | **Stateful** | 수동/고정 | 비동기 메시지 유실 | Watermark 민감 |
 | Qdrant | **Stateful** | 벡터 수에 비례 | 추천/검색 불가 | 벡터 수 × 차원 × 4B × 1.5 |
 
-Next.js, Spring Boot, FastAPI는 공통적으로 stateless에 가깝고, HPA/rolling update/auto-healing의 대상이며, scale-out 방향이 "replica 증가"다. 반면 RabbitMQ는 메모리 watermark가 중요한 stateful 워크로드이고, Qdrant는 벡터 수와 차원에 따라 메모리 사용량이 결정되는 메모리 집약 워크로드다.
-
-이 둘을 app 노드와 섞으면, **node memory pressure가 생겼을 때 app과 data가 함께 흔들린다.** kubelet은 메모리 압박 시 Pod를 선제적으로 종료(eviction)할 수 있고, OOM이 먼저 오면 kernel OOM killer가 개입한다. 그래서 기본 배치는 **control-plane / app / data 3계층**으로 시작한다.
+Next.js, Spring Boot, FastAPI는 공통적으로 stateless에 가깝고, HPA/rolling update/auto-healing의 대상이며, scale-out 방향이 "replica 증가"다. 
+반면 RabbitMQ와 Qdrant는 stateful하며, 단순한 replica 증가로 해결되지 않는다
+이들을 섞으면 scaleout되는 app Pod 들에 의해서 data pod들의 자원 사용에 영향을 끼칠 수 있다.
+request와 limit을 잘 관리하면 QoS에 의해서 OOM killer가 app pod를 우선으로 내보내겠지만, 그 이전까진 영향을 받는 것은 마찬가지이다.
 
 ---
 
 ## 4. 네임스페이스 설계
 
-### 4.1 왜 서비스 이름이 아니라 운영 경계로 나누는가
-
-네임스페이스를 설계할 때 가장 먼저 떠오르는 방식은 서비스 이름 기준 분리다. `billage-auth`, `billage-chat`, `billage-notification` 식으로 나누는 것이다. 하지만 우리 서비스는 MSA가 아니다. Spring Boot 모놀리스가 인증, 채팅, 알림을 모두 처리한다. 기능은 구분될 수 있어도, 실제로는 같은 릴리즈 안에서 함께 움직이고 같은 파이프라인을 탄다. 서비스별 네임스페이스 분리는 운영 복잡도만 늘리고 실질적인 격리 효과는 없다.
-
+### 4.1 namespace 목적
 네임스페이스로 할 수 있는 것은 크게 네 가지다.
 
 **1) 배포 경계**: 같은 네임스페이스 안의 리소스는 같은 ArgoCD Application으로 관리할 수 있다. 배포 단위가 곧 네임스페이스 단위가 된다. 앱만 수정해서 배포해야 하는데 RabbitMQ 설정이 같은 배포 범위 안에 있으면, 단순한 앱 릴리즈가 stateful 컴포넌트의 재적용 위험까지 가져온다.
 
 **2) 권한 경계**: RBAC은 네임스페이스 단위로 적용된다. 앱 배포를 수행하는 CI/CD 서비스 어카운트가 데이터 계층의 Secret(DB 비밀번호, RabbitMQ 인증정보)까지 접근할 수 있으면 안 된다.
 
-**3) 리소스 정책 경계**: ResourceQuota, LimitRange, NetworkPolicy는 네임스페이스 단위로 적용된다. Stateless 앱은 HPA로 탄력적으로 확장되어야 하지만, RabbitMQ는 보수적인 자원 설정이 필요하다. 같은 정책 공간에 두면 한쪽에 맞추면 다른 쪽이 어긋난다.
+**3) 리소스 정책 경계**: ResourceQuota, LimitRange, NetworkPolicy는 네임스페이스 단위로 적용된다. Stateless 앱은 HPA로 탄력적으로 확장되어야 하지만, RabbitMQ는 보수적인 자원 설정이 필요하다.
 
 **4) 운영 절차 경계**: 앱 Pod는 재시작과 롤링 업데이트에 유연하지만, RabbitMQ는 재시작 순서와 디스크 상태를 고려해야 한다. 모니터링 도구는 장애 시 가장 먼저 확인해야 할 대상이므로, 사용자 서비스와 같은 경계에 섞으면 안 된다.
 
@@ -93,7 +229,6 @@ ArgoCD로 앱을 배포할 때, `billage-app`에 대한 Application과 `billage-
 ---
 
 ## 5. 리소스 계산:
-
 ### 5.1 컴포넌트별 리소스 산정
 
 | 컴포넌트 | CPU request | Memory request | CPU limit | Memory limit | 산정 근거 |
@@ -110,12 +245,6 @@ ArgoCD로 앱을 배포할 때, `billage-app`에 대한 Application과 `billage-
 Pod 수를 정하기 전에, 먼저 각 컴포넌트의 특성을 고려해야 한다.
 
 **Spring Boot (3 Replicas)**
-
-상한 rps : 3000
-
-평균 rps :1000
-
-새벽 rps : 200
 
 핵심 서비스이므로 단일 Pod 장애 시에도 서비스가 유지되어야 한다. MAU 100만 기준 피크 RPS 3,000 중 REST + WebSocket이 차지하는 비율이 약 70%라고 보면 2,100 RPS. Pod당 처리량을 500 RPS로 잡으면 4.2 → 5개가 필요하지만, 이건 피크 시점이다. **최소 replica는 평시 기준으로 잡고, 피크는 HPA가 처리한다.** 평시(새벽~오전)는 피크의 30% 수준이므로 630 RPS → 2 Pod면 충분하지만, HA를 위해 **최소 3 Pod**. 1개가 죽어도 2개가 트래픽을 감당한다.
 
@@ -285,9 +414,7 @@ App baseline request: CPU 3.65 vCPU, Memory 5.25Gi
 
 m7i-flex.large 1대의 allocatable: ~1.93 vCPU, ~6.1Gi
 
-여분을 "항상 30% 남긴다" 식의 퍼센트로 잡는 것은 여기서 최적이 아니다. app plane에서 CPU headroom은 **HPA/CA 반응 지연을 버티는 운영점**으로 잡아야 한다. 
-
-HPA는 새 Pod를 만들고, Cluster Autoscaler는 unschedulable Pod가 생긴 뒤 새 노드를 만든다. 둘 다 request 기반으로 움직인다. 그래서 **steady state에서 allocatable CPU의 60% 안쪽**을 목표로 둔다.
+여분을 "항상 30% 남긴다" 식의 퍼센트로 잡는 것은 여기서 최적이 아니다. app plane에서 CPU headroom은 **HPA/CA 반응 지연을 버티는 운영점**으로 잡아야 한다. HPA는 새 Pod를 만들고, Cluster Autoscaler는 unschedulable Pod가 생긴 뒤 새 노드를 만든다. 둘 다 request 기반으로 움직인다. 그래서 **steady state에서 allocatable CPU의 60% 안쪽**을 목표로 둔다.
 
 - CPU 기준 필요 노드: ceil(3.65 / (1.93 × 0.6)) = ceil(3.65 / 1.158) = **4대**
 - Memory 기준 필요 노드: ceil(5.25 / (6.1 × 0.7)) = ceil(5.25 / 4.27) = **2대**
@@ -520,7 +647,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: default-deny-all
-  namespace: billage-app
+  namespace: billage
 spec:
   podSelector: {}
   policyTypes:
@@ -641,7 +768,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: main-server-hpa
-  namespace: billage-app
+  namespace: billage
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -788,7 +915,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: main-server-pdb
-  namespace: billage-app
+  namespace: billage
 spec:
   minAvailable: 75%  # 최소 75% Pod 유지
   selector:
@@ -870,7 +997,7 @@ spec:
     path: apps
   destination:
     server: https://kubernetes.default.svc
-    namespace: billage-app
+    namespace: billage
   syncPolicy:
     automated:
       prune: true       # 삭제된 리소스 자동 정리
@@ -881,193 +1008,3 @@ spec:
 ```
 
 ### 6.5 Helm Chart 활용 계획
-
-### Chart 구조
-
-```
-billage-helm/
-├── Chart.yaml
-├── values.yaml
-├── values-dev.yaml
-├── values-prod.yaml
-└── templates/
-    ├── deployment.yaml
-    ├── service.yaml
-    ├── hpa.yaml
-    ├── configmap.yaml
-    └── _helpers.tpl
-
-```
-
-### values.yaml 예시
-
-```yaml
-# values-prod.yaml
-global:
-  environment: production
-  imageRegistry: 123456789.dkr.ecr.ap-northeast-2.amazonaws.com
-
-mainServer:
-  replicaCount: 4
-  image:
-    repository: billage/main-server
-    tag: v1.0.0
-  resources:
-    requests:
-      cpu: 1000m
-      memory: 2Gi
-    limits:
-      cpu: 2000m
-      memory: 4Gi
-  hpa:
-    enabled: true
-    minReplicas: 4
-    maxReplicas: 15
-    targetCPU: 70
-
-webServer:
-  replicaCount: 3
-  image:
-    repository: billage/web-server
-    tag: v1.0.0
-  resources:
-    requests:
-      cpu: 500m
-      memory: 1Gi
-
-chatServer:
-  replicaCount: 3
-  image:
-    repository: billage/chat-server
-    tag: v1.0.0
-  nodeSelector:
-    node-group: realtime
-
-```
-
----
-
-## 7. 클러스터 구성 상세
-
-### 7.1 Kubeadm 초기화
-
-### 마스터 노드 초기화 (첫 번째 노드)
-
-```bash
-# 사전 요구사항 설치 (모든 노드)
-sudo apt-get update
-sudo apt-get install -y apt-transport-https ca-certificates curl
-
-# containerd 설치
-sudo apt-get install -y containerd
-sudo mkdir -p /etc/containerd
-containerd config default | sudo tee /etc/containerd/config.toml
-sudo systemctl restart containerd
-
-# kubeadm, kubelet, kubectl 설치
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
-sudo apt-get update
-sudo apt-get install -y kubelet kubeadm kubectl
-sudo apt-mark hold kubelet kubeadm kubectl
-
-# 마스터 노드 초기화
-sudo kubeadm init \
-  --control-plane-endpoint "k8s-api.village.internal:6443" \
-  --upload-certs \
-  --pod-network-cidr=192.168.0.0/16 \
-  --apiserver-advertise-address=10.0.1.10
-
-# kubeconfig 설정
-mkdir -p $HOME/.kube
-sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-sudo chown $(id -u):$(id -g) $HOME/.kube/config
-
-```
-
-### 추가 마스터 노드 Join
-
-```bash
-# 초기화 시 출력된 join 명령어 사용
-sudo kubeadm join k8s-api.village.internal:6443 \
-  --token <token> \
-  --discovery-token-ca-cert-hash sha256:<hash> \
-  --control-plane \
-  --certificate-key <certificate-key>
-
-```
-
-### 워커 노드 Join
-
-```bash
-# 워커 노드 Join (노드 그룹별 라벨 추가)
-sudo kubeadm join k8s-api.village.internal:6443 \
-  --token <token> \
-  --discovery-token-ca-cert-hash sha256:<hash>
-
-# 노드 라벨 추가 (마스터에서 실행)
-kubectl label nodes worker-1 node-group=general
-kubectl label nodes worker-2 node-group=general
-kubectl label nodes worker-3 node-group=general
-kubectl label nodes worker-4 node-group=realtime
-kubectl label nodes worker-5 node-group=realtime
-kubectl label nodes worker-6 node-group=ai
-kubectl label nodes worker-7 node-group=ai
-
-```
-
-### 7.2 Calico CNI 설치
-
-```bash
-# Calico 설치
-kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.1/manifests/calico.yaml
-
-# Calico 설치 확인
-kubectl get pods -n calico-system
-
-```
-
-### 7.3 Ingress Controller 설치 (Nginx)
-
-```yaml
-# nginx-ingress-controller.yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: ingress-nginx
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: nginx-ingress-controller
-  namespace: ingress-nginx
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: nginx-ingress
-  template:
-    metadata:
-      labels:
-        app: nginx-ingress
-    spec:
-      containers:
-      - name: nginx-ingress-controller
-        image: k8s.gcr.io/ingress-nginx/controller:v1.8.1
-        args:
-        - /nginx-ingress-controller
-        - --publish-service=$(POD_NAMESPACE)/ingress-nginx-controller
-        env:
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name
-        - name: POD_NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
-        ports:
-        - containerPort: 80
-        - containerPort: 443
-
-```

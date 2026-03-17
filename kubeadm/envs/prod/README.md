@@ -37,11 +37,11 @@
 - kubeadm `init/join`용 `cloud-init`, `kubeadm` config template, SSM 실행 스크립트
 - Calico 설치 및 node-to-node BGP mesh 기본값
 - 노드 라벨링과 data pool taint 재조정
-- `village-app`, `village-data`, `village-edge`, `village-ops` 네임스페이스
+- `billage-app`, `billage-data`, `billage-edge`, `billage-ops` 네임스페이스
 - 네임스페이스별 서비스 어카운트/RBAC
 - default-deny + whitelist 기반 기본 NetworkPolicy
 - `ingress-nginx`, `aws-load-balancer-controller`, `cert-manager`
-- `ALB(ACM TLS) -> ingress-nginx(NodePort) -> village-edge smoke service` 경로
+- `ALB(ACM TLS) -> ingress-nginx(NodePort) -> billage-edge smoke service` 경로
 
 ## Bootstrap 흐름
 1. `terraform apply`로 EC2 10대와 기반 인프라를 만든다.
@@ -57,9 +57,9 @@
    - 노드 라벨/taint 보정
    - 네임스페이스/RBAC/NetworkPolicy 적용
    - `cert-manager`, `ingress-nginx`, `aws-load-balancer-controller` 설치
-   - `village-edge` smoke service와 public ALB ingress 생성
+   - `billage-edge` smoke service와 public ALB ingress 생성
 6. `ingress-nginx-public-alb`의 hostname을 확인하고 `public_edge_host`를 그 ALB로 연결한다.
-7. DNS 전파 후 `kubectl get certificate -n village-edge`와 `kubectl get ingress -n ingress-nginx`로 edge 경로를 확인한다.
+7. DNS 전파 후 `kubectl get certificate -n billage-edge`와 `kubectl get ingress -n ingress-nginx`로 edge 경로를 확인한다.
 
 ## 템플릿 파일 요약
 - `bootstrap-common.sh.tftpl`: containerd, kubelet, kubeadm, kubectl, sysctl, swap, 커널 모듈 준비
@@ -122,11 +122,11 @@ aws ssm send-command \
   - control-plane 3, app 4, data 3이 모두 보여야 한다.
 - `kubectl get pods -n calico-system`
   - `calico-node`, `calico-kube-controllers`가 정상이어야 한다.
-- `kubectl get ns village-app village-data village-edge village-ops`
+- `kubectl get ns billage-app billage-data billage-edge billage-ops`
 - `kubectl get networkpolicy -A`
 - `kubectl get ingress -n ingress-nginx ingress-nginx-public-alb`
-- `kubectl get certificate -n village-edge`
-- `kubectl get svc -n village-edge edge-smoketest`
+- `kubectl get certificate -n billage-edge`
+- `kubectl get svc -n billage-edge edge-smoketest`
 
 ## 주의사항
 - control-plane 노드는 `k8s-api.village.internal`을 로컬 private IP로 우선 해석하도록 설계한다.

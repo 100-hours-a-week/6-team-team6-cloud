@@ -113,11 +113,18 @@ module "api_endpoint" {
 }
 
 locals {
+  calico_kubernetes_service_host = lookup(
+    module.compute.control_plane_private_ips,
+    "${var.cluster_name}-cp-01",
+    "${var.kube_apiserver_record_name}.${var.private_dns_zone_name}"
+  )
+
   platform_bootstrap_script = templatefile("${path.module}/templates/ssm-platform-bootstrap.sh.tftpl", {
     cluster_name                = var.cluster_name
     aws_region                  = var.aws_region
     vpc_id                      = module.network.vpc_id
     control_plane_endpoint      = "${var.kube_apiserver_record_name}.${var.private_dns_zone_name}"
+    calico_kubernetes_service_host = local.calico_kubernetes_service_host
     public_edge_host            = var.public_edge_host
     cert_manager_email          = var.cert_manager_email
     cert_manager_acme_server    = var.cert_manager_acme_server
