@@ -21,16 +21,32 @@
 > ```
 > `JOIN_ENV_B64`가 비어 있으면 [02-cp-init.md](./02-cp-init.md) Step 3을 다시 실행한다.
 
+> **⏱ CERTIFICATE_KEY 만료 주의**: `cluster-join.env`에 포함된 `CERTIFICATE_KEY`는 **2시간** 후 만료된다.
+> 02-cp-init.md 완료 후 이 단계를 2시간 이내에 시작해야 한다.
+> 만료된 경우 cp-01에서 아래 명령으로 갱신한 뒤 `JOIN_ENV_B64`를 다시 생성한다:
+> ```bash
+> # cp-01에서 certificate key 재생성
+> aws ssm send-command \
+>   --document-name "AWS-RunShellScript" \
+>   --instance-ids "$CP01" \
+>   --parameters 'commands=["kubeadm init phase upload-certs --upload-certs 2>/dev/null | tail -1"]' \
+>   --region ap-northeast-2
+> # 출력된 새 CERTIFICATE_KEY를 cluster-join.env에 반영 후 JOIN_ENV_B64 재생성
+> ```
+
 ---
 
 ## Step 1. 추가 Control Plane Join (cp-02, cp-03)
 
-cp-02와 cp-03은 동시에 join할 수 있다.
+> **반드시 순차적으로 join한다.** cp-02/cp-03을 동시에 join하면 etcd quorum 전환 중 충돌이 발생해
+> 둘 다 실패하거나 control plane 전체가 불안정해진다. ([99-troubleshooting.md](./99-troubleshooting.md) 참조)
+
+### Step 1-1. cp-02 Join
 
 ```bash
 CMD_ID=$(aws ssm send-command \
   --document-name "AWS-RunShellScript" \
-  --instance-ids "$CP02" "$CP03" \
+  --instance-ids "$CP02" \
   --parameters "{\"commands\":[
     \"export JOIN_ENV_B64=${JOIN_ENV_B64}\",
     \"/opt/kubeadm/bin/write-join-env.sh\",
@@ -39,27 +55,69 @@ CMD_ID=$(aws ssm send-command \
   --region ap-northeast-2 \
   --query "Command.CommandId" --output text)
 
-echo "CP Join Command ID: $CMD_ID"
-```
+echo "CP02 Join Command ID: $CMD_ID"
 
-완료까지 3-5분 소요된다.
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP02" --region ap-northeast-2 || true
 
-```bash
-# 각 노드 결과 확인
-for NODE in $CP02 $CP03; do
-  echo "=== $NODE ==="
-  aws ssm get-command-invocation \
-    --command-id "$CMD_ID" \
-    --instance-id "$NODE" \
-    --region ap-northeast-2 \
-    --query "{Status:Status,Output:StandardOutputContent}" \
-    --output text
-done
+aws ssm get-command-invocation \
+  --command-id "$CMD_ID" --instance-id "$CP02" --region ap-northeast-2 \
+  --query "{Status:Status,Output:StandardOutputContent}" --output text
 ```
 
 **성공 확인**: `Status: Success`이고 출력에 `This node has joined the cluster` 포함.
 
-> join 후 각 control-plane 노드는 `/etc/hosts`에 `k8s-api.billage.internal → 자신의 private IP`를 등록한다.
+### Step 1-2. cp-02 Readiness 확인 후 cp-03 Join
+
+cp-02 join이 성공한 후, etcd 3-member quorum이 안정화될 때까지 확인한다.
+
+```bash
+CMD_ID=$(aws ssm send-command \
+  --document-name "AWS-RunShellScript" \
+  --instance-ids "$CP01" \
+  --parameters 'commands=[
+    "export KUBECONFIG=/etc/kubernetes/admin.conf",
+    "for i in $(seq 1 12); do STATUS=$(curl -ks -o /dev/null -w \"%{http_code}\" https://localhost:6443/readyz); if [ \"$STATUS\" = \"200\" ]; then echo \"readyz: OK (attempt $i)\"; break; fi; echo \"readyz: $STATUS (attempt $i), waiting...\"; sleep 10; done",
+    "kubectl get nodes --no-headers | wc -l"
+  ]' \
+  --region ap-northeast-2 \
+  --query "Command.CommandId" --output text)
+
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 || true
+
+aws ssm get-command-invocation \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 \
+  --query "StandardOutputContent" --output text
+```
+
+**통과 조건**: `readyz: OK`이고 노드 수가 2 이상이어야 한다.
+
+```bash
+CMD_ID=$(aws ssm send-command \
+  --document-name "AWS-RunShellScript" \
+  --instance-ids "$CP03" \
+  --parameters "{\"commands\":[
+    \"export JOIN_ENV_B64=${JOIN_ENV_B64}\",
+    \"/opt/kubeadm/bin/write-join-env.sh\",
+    \"/opt/kubeadm/bin/control-plane-join.sh /opt/kubeadm/rendered/cluster-join.env\"
+  ]}" \
+  --region ap-northeast-2 \
+  --query "Command.CommandId" --output text)
+
+echo "CP03 Join Command ID: $CMD_ID"
+
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP03" --region ap-northeast-2 || true
+
+aws ssm get-command-invocation \
+  --command-id "$CMD_ID" --instance-id "$CP03" --region ap-northeast-2 \
+  --query "{Status:Status,Output:StandardOutputContent}" --output text
+```
+
+**성공 확인**: `Status: Success`이고 출력에 `This node has joined the cluster` 포함.
+
+> join 후 각 control-plane 노드는 `/etc/hosts`에 `k8s-api.village.internal → 자신의 private IP`를 등록한다.
 > 이는 kubelet/kubeconfig가 NLB를 self-loop하는 것을 방지하기 위한 설계다.
 
 ---
@@ -110,7 +168,8 @@ CMD_ID=$(aws ssm send-command \
   --region ap-northeast-2 \
   --query "Command.CommandId" --output text)
 
-sleep 5
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 || true
 
 aws ssm get-command-invocation \
   --command-id "$CMD_ID" \

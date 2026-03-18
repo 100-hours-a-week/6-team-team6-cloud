@@ -31,7 +31,6 @@ DATA03=$(terraform output -json data_instance_ids | jq -r '."data-03"')
 
 ```bash
 # control-plane
-aws ssm start-session --target $CP01 --region ap-northeast-2
 aws ssm start-session --target $CP02 --region ap-northeast-2
 aws ssm start-session --target $CP03 --region ap-northeast-2
 

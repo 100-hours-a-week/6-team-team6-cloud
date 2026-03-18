@@ -43,8 +43,8 @@
 ## 주요 설계 결정 사항
 
 - **NAT Gateway 없음**: 노드 public IP + SG 제한으로 부트스트랩 egress 확보
-- **kube-apiserver 접근**: internal NLB + private Route53 (`k8s-api.billage.internal`)만 사용
-- **control-plane self-dependency 방지**: 각 control-plane 노드는 `/etc/hosts`에 `k8s-api.billage.internal → 자신의 private IP` 등록
+- **kube-apiserver 접근**: internal NLB + private Route53 (`k8s-api.village.internal`)만 사용
+- **control-plane self-dependency 방지**: 각 control-plane 노드는 `/etc/hosts`에 `k8s-api.village.internal → 자신의 private IP` 등록
 - **TLS 종료**: ALB에서 ACM 인증서로 종료, cert-manager는 nginx ingress용 내부 인증서 관리
 - **IAM**: IRSA 대신 노드 instance profile 사용
 
@@ -56,7 +56,7 @@
 # 변수 재설정 (새 터미널 열 때마다)
 cd kubeadm/envs/prod
 CLUSTER_NAME=$(terraform output -raw platform_bootstrap_ssm_document_name | sed 's/-platform-bootstrap//')
-CP01=$(terraform output -json control_plane_instance_ids | jq -r --arg n "${CLUSTER_NAME}-cp-01" '.[$n]')
+CP01=$(terraform output -json control_plane_instance_ids | jq -r '."cp-01"')
 SSM_DOC=$(terraform output -raw platform_bootstrap_ssm_document_name)
 
 # 노드 상태 확인

@@ -40,14 +40,14 @@ ssh_allowed_cidrs = []
 key_name          = null
 
 # Private DNS 설정 (기본값 유지 권장)
-private_dns_zone_name      = "billage.internal"
+private_dns_zone_name      = "village.internal"
 kube_apiserver_record_name = "k8s-api"
 
 # 공개 도메인 — ALB CNAME을 등록할 대상
-public_edge_host = "api.billages.com"
+public_edge_host = "kubeadm.billages.com"
 
 # cert-manager ACME 등록 이메일
-cert_manager_email = "platform@billages.com"
+cert_manager_email = "admin@billages.com"
 
 # ACM 인증서 ARN (ap-northeast-2 리전, 00-prereqs.md에서 발급)
 alb_certificate_arn = "arn:aws:acm:ap-northeast-2:123456789012:certificate/XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
@@ -109,6 +109,18 @@ terraform apply tfplan
 
 > **중요**: 아래 export 블록은 **이후 모든 단계(02~05)에서 재사용**한다.
 > 새 터미널 세션을 열 때마다 이 블록을 다시 실행해야 한다.
+>
+> **변수 영속성 주의**: 셸 세션이 종료되면 모든 변수가 사라진다. 긴 작업 중 터미널이 끊길 수 있으므로,
+> 변수 export 후 `env.sh`로 저장해 두면 복구가 빠르다:
+> ```bash
+> # 변수 저장
+> cat > /tmp/kubeadm-env.sh <<'ENVEOF'
+> export CP01="$CP01" CP02="$CP02" CP03="$CP03"
+> export APP_NODES="$APP_NODES" DATA_NODES="$DATA_NODES"
+> export SSM_DOC="$SSM_DOC" CLUSTER_NAME="$CLUSTER_NAME"
+> ENVEOF
+> # 복구 시: source /tmp/kubeadm-env.sh
+> ```
 
 ```bash
 cd kubeadm/envs/prod
@@ -118,9 +130,9 @@ cd kubeadm/envs/prod
 CLUSTER_NAME=$(terraform output -raw platform_bootstrap_ssm_document_name | sed 's/-platform-bootstrap//')
 echo "CLUSTER_NAME=$CLUSTER_NAME"
 
-CP01=$(terraform output -json control_plane_instance_ids | jq -r --arg n "${CLUSTER_NAME}-cp-01" '.[$n]')
-CP02=$(terraform output -json control_plane_instance_ids | jq -r --arg n "${CLUSTER_NAME}-cp-02" '.[$n]')
-CP03=$(terraform output -json control_plane_instance_ids | jq -r --arg n "${CLUSTER_NAME}-cp-03" '.[$n]')
+CP01=$(terraform output -json control_plane_instance_ids | jq -r '."cp-01"')
+CP02=$(terraform output -json control_plane_instance_ids | jq -r '."cp-02"')
+CP03=$(terraform output -json control_plane_instance_ids | jq -r '."cp-03"')
 
 APP_NODES=$(terraform output -json app_instance_ids | jq -r 'values[]' | tr '\n' ' ' | xargs)
 DATA_NODES=$(terraform output -json data_instance_ids | jq -r 'values[]' | tr '\n' ' ' | xargs)

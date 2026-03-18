@@ -147,7 +147,50 @@ aws ssm send-command \
   --region ap-northeast-2
 ```
 
-**주요 원인**:
+### 동시 join 시 etcd quorum 깨짐 (2026-03-18 확인)
+
+**증상**: cp-02/cp-03을 동시에 join할 때 아래 중 하나 발생
+- cp-03: `error downloading certs: rpc error: code = Unknown desc = malformed header: missing HTTP content-type`
+- cp-02: `net/http: request canceled while waiting for connection (Client.Timeout exceeded while awaiting headers)`
+- 하나는 빠르게 Failed, 다른 하나는 오래 대기 후 Failed
+- join 성공 후에도 apiserver가 응답 불능 상태에 빠짐
+
+**원인**:
+- cp-02가 etcd member로 추가되는 동안 etcd가 1-member → 2-member quorum으로 전환
+- 이 시점에 cp-03도 동시에 cert download / etcd join을 시도
+- etcd quorum 전환 + NLB를 통한 apiserver 접근 부하가 겹쳐 둘 다 실패
+- 최악의 경우 cp-02가 etcd member만 추가된 상태에서 실패 → etcd 2-member quorum 불안정
+
+**해결**: cp-02, cp-03을 **반드시 순차적으로** join해야 한다.
+1. cp-02 join → 완료 대기 → readiness 확인
+2. cp-03 join → 완료 대기 → readiness 확인
+
+이미 실패한 경우:
+```bash
+# 실패한 노드에서 reset (cp-01은 건드리지 않는다)
+for NODE in $CP02 $CP03; do
+  aws ssm send-command \
+    --document-name "AWS-RunShellScript" \
+    --instance-ids "$NODE" \
+    --parameters 'commands=["kubeadm reset -f && rm -rf /etc/kubernetes /root/.kube"]' \
+    --region ap-northeast-2
+done
+
+# cp-01에서 etcd 상태 확인 — member가 잘못 남아있으면 제거
+aws ssm send-command \
+  --document-name "AWS-RunShellScript" \
+  --instance-ids "$CP01" \
+  --parameters 'commands=[
+    "export KUBECONFIG=/etc/kubernetes/admin.conf",
+    "ETCDCTL_API=3 etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/server.crt --key=/etc/kubernetes/pki/etcd/server.key member list"
+  ]' \
+  --region ap-northeast-2
+
+# 불필요한 member 제거 후 cp-02부터 순차 재시도
+```
+
+### 기타 주요 원인
+
 - `token expired` — `BOOTSTRAP_TOKEN`이 만료됨 (유효기간 24시간)
   ```bash
   # cp-01에서 새 토큰 발급 후 cluster-join.env 재생성

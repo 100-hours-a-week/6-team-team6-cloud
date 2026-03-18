@@ -26,9 +26,9 @@
 | **합계** | **10** | |
 
 **네트워킹 경로**
-- kube-apiserver: 전용 VPC + internal NLB + private Route53 (`k8s-api.billage.internal`)
+- kube-apiserver: 전용 VPC + internal NLB + private Route53 (`k8s-api.village.internal`)
 - 외부 진입: internet-facing ALB (ACM TLS) → ingress-nginx (NodePort) → billage-edge
-- 클러스터 DNS: `billage.internal` private hosted zone
+- 클러스터 DNS: `village.internal` private hosted zone
 
 **부트스트랩 흐름**
 ```

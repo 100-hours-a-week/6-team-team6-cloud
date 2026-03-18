@@ -54,12 +54,24 @@ echo "Platform Bootstrap Command ID: $CMD_ID"
 전체 소요 시간은 **15-25분**이다. 아래 명령으로 10초 간격으로 상태를 확인한다:
 
 ```bash
+# watch가 설치된 경우 (macOS: brew install watch)
 watch -n 10 "aws ssm get-command-invocation \
   --command-id $CMD_ID \
   --instance-id $CP01 \
   --region ap-northeast-2 \
   --query '{Status:Status,Output:StandardOutputContent}' \
   --output text 2>&1 | tail -30"
+
+# watch가 없는 경우 (macOS 기본) — while 루프로 대체
+while true; do
+  clear
+  aws ssm get-command-invocation \
+    --command-id "$CMD_ID" --instance-id "$CP01" \
+    --region ap-northeast-2 \
+    --query "{Status:Status,Output:StandardOutputContent}" \
+    --output text 2>&1 | tail -30
+  sleep 10
+done
 ```
 
 또는 한 번씩 수동 확인:
@@ -111,7 +123,9 @@ CMD_ID=$(aws ssm send-command \
   --region ap-northeast-2 \
   --query "Command.CommandId" --output text)
 
-sleep 10
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 || true
+
 aws ssm get-command-invocation \
   --command-id "$CMD_ID" \
   --instance-id "$CP01" \
@@ -165,7 +179,9 @@ CMD_ID=$(aws ssm send-command \
   --region ap-northeast-2 \
   --query "Command.CommandId" --output text)
 
-sleep 5
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 || true
+
 aws ssm get-command-invocation \
   --command-id "$CMD_ID" \
   --instance-id "$CP01" \
@@ -200,7 +216,9 @@ CMD_ID=$(aws ssm send-command \
   --region ap-northeast-2 \
   --query "Command.CommandId" --output text)
 
-sleep 15
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 || true
+
 aws ssm get-command-invocation \
   --command-id "$CMD_ID" --instance-id "$CP01" \
   --region ap-northeast-2 --query "StandardOutputContent" --output text
@@ -224,7 +242,9 @@ CMD_ID=$(aws ssm send-command \
   --region ap-northeast-2 \
   --query "Command.CommandId" --output text)
 
-sleep 15
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 || true
+
 aws ssm get-command-invocation \
   --command-id "$CMD_ID" --instance-id "$CP01" \
   --region ap-northeast-2 --query "StandardOutputContent" --output text
@@ -241,7 +261,9 @@ CMD_ID=$(aws ssm send-command \
   --region ap-northeast-2 \
   --query "Command.CommandId" --output text)
 
-sleep 10
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 || true
+
 aws ssm get-command-invocation \
   --command-id "$CMD_ID" --instance-id "$CP01" \
   --region ap-northeast-2 --query "StandardOutputContent" --output text
@@ -252,28 +274,49 @@ aws ssm get-command-invocation \
 RabbitMQ, Qdrant 등 StatefulSet이 PVC를 사용하려면 EBS CSI Driver와 gp3 StorageClass가 있어야 한다.
 
 > **전제**: EBS CSI Driver용 IAM Role이 사전에 생성되어 있어야 한다 ([00-prereqs.md](./00-prereqs.md) 참조).
+>
+> **참고**: 현재 Terraform outputs에 `ebs_csi_controller_role_arn`은 정의되어 있지 않다.
+> IAM Role ARN을 직접 지정해야 한다. IRSA를 사용하지 않는 경우(노드 instance profile로 권한 부여 시),
+> Role ARN 설정 없이 설치할 수 있다.
 
 ```bash
-EBS_CSI_ROLE_ARN=$(terraform -chdir=kubeadm/envs/prod output -raw ebs_csi_controller_role_arn 2>/dev/null || echo "")
-
-# Role ARN을 직접 지정할 경우
+# IAM Role ARN 설정 — 아래 중 하나를 선택
+# (A) IRSA 사용 시: 사전에 생성한 Role ARN을 직접 입력
 # EBS_CSI_ROLE_ARN="arn:aws:iam::ACCOUNT_ID:role/billage-kubeadm-prod-ebs-csi-controller"
+# (B) 노드 instance profile 사용 시 (현재 구성): 빈 문자열
+EBS_CSI_ROLE_ARN=""
 
+# Step 1: Helm으로 EBS CSI Driver 설치
 CMD_ID=$(aws ssm send-command \
   --document-name "AWS-RunShellScript" \
   --instance-ids "$CP01" \
-  --parameters "commands=[
-    \"helm repo add aws-ebs-csi-driver https://kubernetes-sigs.github.io/aws-ebs-csi-driver --force-update\",
-    \"helm upgrade --install aws-ebs-csi-driver aws-ebs-csi-driver/aws-ebs-csi-driver \
-      --namespace kube-system \
-      --set controller.serviceAccount.annotations.\\\"eks.amazonaws.com/role-arn\\\"=${EBS_CSI_ROLE_ARN} \
-      --wait --timeout 180s\",
-    \"kubectl apply -f - <<'EOF'\napiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata:\n  name: gp3\n  annotations:\n    storageclass.kubernetes.io/is-default-class: \\\"true\\\"\nprovisioner: ebs.csi.aws.com\nparameters:\n  type: gp3\n  encrypted: \\\"true\\\"\nvolumeBindingMode: WaitForFirstConsumer\nreclaimPolicy: Retain\nEOF\"
-  ]" \
+  --parameters 'commands=[
+    "helm repo add aws-ebs-csi-driver https://kubernetes-sigs.github.io/aws-ebs-csi-driver --force-update",
+    "helm upgrade --install aws-ebs-csi-driver aws-ebs-csi-driver/aws-ebs-csi-driver --namespace kube-system --wait --timeout 180s"
+  ]' \
   --region ap-northeast-2 \
   --query "Command.CommandId" --output text)
 
-sleep 30
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 || true
+
+aws ssm get-command-invocation \
+  --command-id "$CMD_ID" --instance-id "$CP01" \
+  --region ap-northeast-2 --query "StandardOutputContent" --output text
+
+# Step 2: gp3 StorageClass 생성
+CMD_ID=$(aws ssm send-command \
+  --document-name "AWS-RunShellScript" \
+  --instance-ids "$CP01" \
+  --parameters 'commands=[
+    "cat <<SCEOF | kubectl apply -f -\napiVersion: storage.k8s.io/v1\nkind: StorageClass\nmetadata:\n  name: gp3\n  annotations:\n    storageclass.kubernetes.io/is-default-class: \"true\"\nprovisioner: ebs.csi.aws.com\nparameters:\n  type: gp3\n  encrypted: \"true\"\nvolumeBindingMode: WaitForFirstConsumer\nreclaimPolicy: Retain\nSCEOF"
+  ]' \
+  --region ap-northeast-2 \
+  --query "Command.CommandId" --output text)
+
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 || true
+
 aws ssm get-command-invocation \
   --command-id "$CMD_ID" --instance-id "$CP01" \
   --region ap-northeast-2 --query "StandardOutputContent" --output text
@@ -292,7 +335,9 @@ CMD_ID=$(aws ssm send-command \
   --region ap-northeast-2 \
   --query "Command.CommandId" --output text)
 
-sleep 10
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 || true
+
 aws ssm get-command-invocation \
   --command-id "$CMD_ID" --instance-id "$CP01" \
   --region ap-northeast-2 --query "StandardOutputContent" --output text

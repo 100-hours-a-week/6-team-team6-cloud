@@ -1,6 +1,13 @@
 # kubeadm/envs/prod Terraform 구조 가이드
 
+## 근본 목적
+
 kubeadm self-managed Kubernetes 클러스터를 구성하는 Terraform 파일과 템플릿의 역할, 상호 관계, 현재 상태를 정리한다.
+
+## 비목적
+
+- Terraform 사용법이나 HCL 문법을 처음부터 설명하지 않는다.
+- 개별 리소스의 AWS API 명세를 중복 기술하지 않는다.
 
 ---
 
@@ -59,8 +66,8 @@ S3 버킷: billage-terraform-state-prod
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `vpc_cidr` | 없음 | 전용 VPC CIDR (/16 권장) |
-| `private_dns_zone_name` | `"village.internal"` | ⚠️ **billage.internal로 변경 필요** — apply 후 변경 불가 |
-| `kube_apiserver_record_name` | `"k8s-api"` | DNS 레코드 이름 (결과: `k8s-api.billage.internal`) |
+| `private_dns_zone_name` | `"village.internal"` | 클러스터 내부 DNS 존 — apply 후 변경 불가 |
+| `kube_apiserver_record_name` | `"k8s-api"` | DNS 레코드 이름 (결과: `k8s-api.village.internal`) |
 | `availability_zones` | 없음 | 3개 AZ 목록 |
 | `kubernetes_version` | `"v1.28.0"` | kubeadm/kubelet 버전 |
 | `pod_network_cidr` | 없음 | Calico Pod CIDR (VPC/Service와 겹치면 안 됨) |
@@ -68,7 +75,7 @@ S3 버킷: billage-terraform-state-prod
 | `calico_bgp_as_number` | 없음 | Calico BGP AS 번호 (보통 64512) |
 | `alb_certificate_arn` | 없음 | ap-northeast-2 ACM 인증서 ARN |
 
-> **주의**: `private_dns_zone_name` 기본값이 아직 `village.internal`이다. `terraform apply` 전 반드시 `terraform.tfvars`에서 `billage.internal`로 지정할 것.
+> `private_dns_zone_name`은 `terraform apply` 후 변경 불가 (kube-apiserver TLS SAN에 포함됨). 현재 `village.internal`로 확정.
 
 ---
 
@@ -107,7 +114,7 @@ calico_kubernetes_service_host = lookup(
 | `control_plane_instance_ids` | CP01/02/03 instance ID → SSM 명령 대상 |
 | `app_instance_ids` / `data_instance_ids` | worker instance ID |
 | `control_plane_private_ips` | cp-01 private IP (Calico hotfix용) |
-| `kube_apiserver_fqdn` | `k8s-api.billage.internal` |
+| `kube_apiserver_fqdn` | `k8s-api.village.internal` |
 | `platform_bootstrap_ssm_document_name` | SSM Document 이름 |
 
 ---
@@ -115,7 +122,7 @@ calico_kubernetes_service_host = lookup(
 ### `terraform.tfvars.example`
 실제 값을 채워야 하는 변수 가이드. `cp terraform.tfvars.example terraform.tfvars` 후 수정한다.
 
-⚠️ **`private_dns_zone_name = "village.internal"`** 줄이 있다 — `billage.internal`로 바꿔야 한다.
+`private_dns_zone_name = "village.internal"`이 설정되어 있다. 이 값이 클러스터 전체에서 사용하는 내부 DNS 존이다.
 
 ---
 
@@ -230,12 +237,12 @@ Internal NLB
        ├── cp-02 (6443)
        └── cp-03 (6443)
 
-Route53 Private Hosted Zone: billage.internal (VPC 내부 전용)
+Route53 Private Hosted Zone: village.internal (VPC 내부 전용)
   └── A 레코드 (ALIAS): k8s-api → NLB DNS
-      결과: k8s-api.billage.internal:6443 → NLB → cp-01~03:6443
+      결과: k8s-api.village.internal:6443 → NLB → cp-01~03:6443
 ```
 
-**self-loop 방지 설계**: control-plane 노드 자신이 NLB를 통해 자신의 kube-apiserver에 접근하면 NLB 헬스체크 타임아웃 등으로 불안정해진다. 이를 방지하기 위해 각 cp 노드의 `/etc/hosts`에 `k8s-api.billage.internal → 자신의 private IP`를 등록한다 (cloud-init에서 자동 처리).
+**self-loop 방지 설계**: control-plane 노드 자신이 NLB를 통해 자신의 kube-apiserver에 접근하면 NLB 헬스체크 타임아웃 등으로 불안정해진다. 이를 방지하기 위해 각 cp 노드의 `/etc/hosts`에 `k8s-api.village.internal → 자신의 private IP`를 등록한다 (cloud-init에서 자동 처리).
 
 ---
 
@@ -275,7 +282,7 @@ Route53 Private Hosted Zone: billage.internal (VPC 내부 전용)
 cp-01에서 `kubeadm init`을 실행하는 스크립트. **SSM RunShellScript로 수동 트리거** (cloud-init이 자동 실행하지 않음).
 
 실행 내용:
-1. `/etc/hosts`에 `k8s-api.billage.internal → 자신의 private IP` 등록 (NLB self-loop 방지)
+1. `/etc/hosts`에 `k8s-api.village.internal → 자신의 private IP` 등록 (NLB self-loop 방지)
 2. `kubeadm init --config kubeadm-init-config.yaml` 실행
 3. kubeconfig 설정 (`~root/.kube/config`)
 4. join 재료(token, CA hash, certificate key) 추출 → `/opt/kubeadm/rendered/cluster-join.env`에 저장
@@ -318,11 +325,11 @@ export JOIN_ENV_B64=<base64_string>
 
 주요 설정:
 ```yaml
-controlPlaneEndpoint: "k8s-api.billage.internal:6443"  # NLB endpoint
+controlPlaneEndpoint: "k8s-api.village.internal:6443"  # NLB endpoint
 podSubnet: 192.168.0.0/16                               # Calico Pod CIDR
 serviceSubnet: 10.96.0.0/12
 certSANs:
-  - k8s-api.billage.internal
+  - k8s-api.village.internal
   - <cp-01 private IP>
 nodeRegistration:
   kubeletExtraArgs:
@@ -410,7 +417,7 @@ terraform apply -target=aws_ssm_document.platform_bootstrap  # SSM Document 업�
 ```bash
 cd kubeadm/envs/prod
 terraform destroy
-# terraform.tfvars에서 private_dns_zone_name = "billage.internal" 변경 후
+# terraform.tfvars 확인 후 (private_dns_zone_name = "village.internal")
 terraform apply
 # → runbook 00-prereqs → 01-terraform → 02 → 03 → 04 → 05 순서대로
 ```

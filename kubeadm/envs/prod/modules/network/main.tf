@@ -177,6 +177,11 @@ resource "aws_route_table_association" "worker" {
   route_table_id = aws_route_table.private[each.key].id
 }
 
+output "private_route_table_ids" {
+  description = "Private route table IDs (one per AZ) used by control-plane and worker subnets"
+  value       = [for rt in aws_route_table.private : rt.id]
+}
+
 output "vpc_id" {
   value = aws_vpc.this.id
 }
