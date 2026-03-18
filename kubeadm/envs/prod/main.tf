@@ -18,7 +18,10 @@ data "aws_ami" "ubuntu" {
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
+    # Pin to 20260218 build — 20260313 build causes kubelet restart race condition
+    # during kubeadm init, leading to etcd/apiserver CrashLoopBackOff.
+    # See: docs/runbook/2026-03-18-cp-crashloop-troubleshooting.md
+    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-20260218*"]
   }
 
   filter {
@@ -115,7 +118,7 @@ module "api_endpoint" {
 locals {
   calico_kubernetes_service_host = lookup(
     module.compute.control_plane_private_ips,
-    "${var.cluster_name}-cp-01",
+    "cp-01",
     "${var.kube_apiserver_record_name}.${var.private_dns_zone_name}"
   )
 
@@ -125,6 +128,7 @@ locals {
     vpc_id                      = module.network.vpc_id
     control_plane_endpoint      = "${var.kube_apiserver_record_name}.${var.private_dns_zone_name}"
     calico_kubernetes_service_host = local.calico_kubernetes_service_host
+    private_route_table_ids     = join(",", module.network.private_route_table_ids)
     public_edge_host            = var.public_edge_host
     cert_manager_email          = var.cert_manager_email
     cert_manager_acme_server    = var.cert_manager_acme_server

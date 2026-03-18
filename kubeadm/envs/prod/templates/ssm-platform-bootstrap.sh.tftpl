@@ -16,6 +16,7 @@ ALB_CERTIFICATE_ARN="${alb_certificate_arn}"
 CALICO_VERSION="${calico_version}"
 CALICO_BGP_AS_NUMBER="${calico_bgp_as_number}"
 POD_NETWORK_CIDR="${pod_network_cidr}"
+PRIVATE_ROUTE_TABLE_IDS="${private_route_table_ids}"
 INGRESS_NGINX_CHART_VERSION="${ingress_nginx_chart_version}"
 CERT_MANAGER_CHART_VERSION="${cert_manager_chart_version}"
 AWS_LBC_CHART_VERSION="${aws_lbc_chart_version}"
@@ -178,6 +179,48 @@ EOF
   kubectl rollout status daemonset/csi-node-driver -n calico-system --timeout=15m
   kubectl rollout status daemonset/calico-node -n calico-system --timeout=15m
   kubectl rollout status deployment/calico-kube-controllers -n calico-system --timeout=10m
+}
+
+add_bgp_vpc_routes() {
+  echo "Adding BGP VPC routes for pod CIDRs..."
+
+  kubectl get ipamblocks -o json | jq -r '
+    .items[] |
+    select(.spec.affinity != null) |
+    [.spec.cidr, (.spec.affinity | ltrimstr("host:"))] |
+    @tsv
+  ' | while IFS=$'\t' read -r pod_cidr node_name; do
+    instance_id=$(aws ec2 describe-instances \
+      --filters \
+        "Name=tag:Name,Values=$${node_name}" \
+        "Name=instance-state-name,Values=running" \
+      --query "Reservations[0].Instances[0].InstanceId" \
+      --output text \
+      --region "$${AWS_REGION}" 2>/dev/null)
+
+    if [ -z "$${instance_id}" ] || [ "$${instance_id}" = "None" ]; then
+      echo "WARNING: instance not found for node $${node_name}, skipping"
+      continue
+    fi
+
+    for rt_id in $(echo "$${PRIVATE_ROUTE_TABLE_IDS}" | tr ',' ' '); do
+      result=$(aws ec2 create-route \
+        --route-table-id "$${rt_id}" \
+        --destination-cidr-block "$${pod_cidr}" \
+        --instance-id "$${instance_id}" \
+        --region "$${AWS_REGION}" 2>&1 || true)
+
+      if echo "$${result}" | grep -q '"Return": true'; then
+        echo "  added $${pod_cidr} -> $${instance_id} ($${node_name}) in $${rt_id}"
+      elif echo "$${result}" | grep -q "RouteAlreadyExists"; then
+        echo "  route $${pod_cidr} already exists in $${rt_id}"
+      else
+        echo "  $${pod_cidr} in $${rt_id}: $${result}"
+      fi
+    done
+  done
+
+  echo "BGP VPC routes setup complete"
 }
 
 apply_foundation_resources() {
@@ -803,6 +846,7 @@ main() {
   install_helm
   reconcile_node_placement
   apply_calico
+  add_bgp_vpc_routes
   wait_for_local_control_plane_stability
   wait_for_nodes_ready
   apply_foundation_resources

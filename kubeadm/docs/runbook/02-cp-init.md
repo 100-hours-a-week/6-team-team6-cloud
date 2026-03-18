@@ -36,8 +36,10 @@ CMD_ID=$(aws ssm send-command \
 
 echo "CMD_ID=$CMD_ID"
 
-# 완료까지 대기 후 결과 확인
-sleep 10
+# 완료까지 대기 (최대 5분, cloud-init 소요 시간 감안)
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 || true
+
 aws ssm get-command-invocation \
   --command-id "$CMD_ID" \
   --instance-id "$CP01" \
@@ -61,7 +63,10 @@ CMD_ID=$(aws ssm send-command \
   --query "Command.CommandId" --output text)
 
 echo "CMD_ID=$CMD_ID"
-sleep 10
+
+# 첫 번째 노드 기준으로 완료 대기
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 || true
 
 # 각 노드 결과 확인
 for NODE in $ALL_NODES; do
@@ -121,6 +126,47 @@ aws ssm send-command \
 
 ---
 
+## Step 2.5. Control Plane Readiness 확인 (필수)
+
+> **반드시 이 단계를 통과해야 Step 3 이후로 진행할 수 있다.**
+> `kubeadm init` 완료 ≠ control plane ready. etcd/apiserver가 안정화되기까지 1-2분 추가로 걸리며,
+> 이 상태에서 cp-02/03을 join하면 etcd quorum이 깨져 전체 control plane이 죽을 수 있다.
+
+```bash
+CMD_ID=$(aws ssm send-command \
+  --document-name "AWS-RunShellScript" \
+  --instance-ids "$CP01" \
+  --parameters 'commands=[
+    "export KUBECONFIG=/etc/kubernetes/admin.conf",
+    "echo === readyz check ===",
+    "for i in $(seq 1 30); do STATUS=$(curl -ks -o /dev/null -w \"%{http_code}\" https://localhost:6443/readyz); if [ \"$STATUS\" = \"200\" ]; then echo \"readyz: OK (attempt $i)\"; break; fi; echo \"readyz: $STATUS (attempt $i), waiting...\"; sleep 10; done",
+    "curl -ks https://localhost:6443/readyz?verbose",
+    "echo === kubectl check ===",
+    "kubectl get nodes",
+    "kubectl get cs"
+  ]' \
+  --region ap-northeast-2 \
+  --query "Command.CommandId" --output text)
+
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 || true
+
+aws ssm get-command-invocation \
+  --command-id "$CMD_ID" \
+  --instance-id "$CP01" \
+  --region ap-northeast-2 \
+  --query "StandardOutputContent" --output text
+```
+
+**통과 조건** (3개 모두 충족):
+1. `readyz: OK` — `/readyz` 엔드포인트 HTTP 200 응답
+2. `[+]etcd ok` + `[+]etcd-readiness ok` — readyz verbose에서 etcd 항목 통과
+3. `kubectl get nodes`에서 cp-01이 보임 (NotReady여도 무방)
+
+**실패 시**: 절대 다음 단계로 진행하지 않는다. cp-01에서 `journalctl -u kubelet -f`로 원인을 확인한다.
+
+---
+
 ## Step 3. Join Env 추출 및 Base64 인코딩
 
 ### cluster-join.env 내용 확인
@@ -133,7 +179,8 @@ CMD_ID=$(aws ssm send-command \
   --region ap-northeast-2 \
   --query "Command.CommandId" --output text)
 
-sleep 5
+aws ssm wait command-executed \
+  --command-id "$CMD_ID" --instance-id "$CP01" --region ap-northeast-2 || true
 
 JOIN_ENV_CONTENT=$(aws ssm get-command-invocation \
   --command-id "$CMD_ID" \
@@ -149,7 +196,7 @@ echo "$JOIN_ENV_CONTENT"
 BOOTSTRAP_TOKEN=abcdef.0123456789abcdef
 CA_CERT_HASH=sha256:aaaa...bbbb
 CERTIFICATE_KEY=cccc...dddd
-CONTROL_PLANE_ENDPOINT=k8s-api.billage.internal
+CONTROL_PLANE_ENDPOINT=k8s-api.village.internal
 ```
 
 > `BOOTSTRAP_TOKEN`은 24시간 유효하다. 그 이상 경과하면 cp-01에서 `kubeadm token create`로 새 토큰을 발급해야 한다.
@@ -157,18 +204,15 @@ CONTROL_PLANE_ENDPOINT=k8s-api.billage.internal
 ### Base64 인코딩
 
 ```bash
-# macOS
-JOIN_ENV_B64=$(echo "$JOIN_ENV_CONTENT" | base64 -b 0)
-
-# Linux
-# JOIN_ENV_B64=$(echo "$JOIN_ENV_CONTENT" | base64 -w 0)
+# macOS/Linux 모두 동작하는 방식 (tr -d로 줄바꿈 제거)
+JOIN_ENV_B64=$(printf '%s' "$JOIN_ENV_CONTENT" | base64 | tr -d '\n')
 
 echo "JOIN_ENV_B64 길이: ${#JOIN_ENV_B64}"
 echo "$JOIN_ENV_B64"
 ```
 
-> **macOS vs Linux**: macOS는 `-b 0`, Linux는 `-w 0`으로 줄바꿈 없는 base64를 출력한다.
-> 인코딩된 문자열에 줄바꿈이 포함되면 디코딩 오류가 발생하므로 반드시 한 줄인지 확인한다.
+> **주의**: `echo` 대신 `printf '%s'`를 사용해 trailing newline이 추가되지 않도록 한다.
+> `base64 | tr -d '\n'`은 macOS/Linux 모두에서 줄바꿈 없는 한 줄 base64를 출력한다.
 
 `JOIN_ENV_B64` 변수를 현재 셸에 보관한다. 이 값은 다음 단계(03)에서 사용된다.
 

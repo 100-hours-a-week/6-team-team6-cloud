@@ -27,8 +27,8 @@ set +a
 NODE_IP="$${NODE_IP:-$(hostname -I | awk '{print $1}')}"
 NODE_NAME="$${NODE_NAME:-$(hostname -s)}"
 
+# Remove any existing hosts entry so kubeadm join reaches the real apiserver via Route53/NLB
 sed -i.bak "/[[:space:]]$${CONTROL_PLANE_ENDPOINT}$/d" /etc/hosts
-echo "$${NODE_IP} $${CONTROL_PLANE_ENDPOINT}" >> /etc/hosts
 
 sed \
   -e "s|__BOOTSTRAP_TOKEN__|$${BOOTSTRAP_TOKEN}|g" \
@@ -39,3 +39,6 @@ sed \
   "$${JOIN_TEMPLATE_PATH}" >"$${RENDERED_JOIN_CONFIG}"
 
 kubeadm join --config "$${RENDERED_JOIN_CONFIG}" | tee /opt/kubeadm/logs/kubeadm-join-control-plane.log
+
+# Pin control-plane endpoint to local IP AFTER successful join (prevents self-dependency loop)
+echo "$${NODE_IP} $${CONTROL_PLANE_ENDPOINT}" >> /etc/hosts

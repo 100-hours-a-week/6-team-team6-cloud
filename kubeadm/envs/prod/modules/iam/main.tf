@@ -323,6 +323,39 @@ resource "aws_iam_role_policy_attachment" "aws_load_balancer_controller" {
   policy_arn = aws_iam_policy.aws_load_balancer_controller.arn
 }
 
+resource "aws_iam_policy" "calico_bgp_routes" {
+  name        = "${var.cluster_name}-calico-bgp-routes"
+  description = "Allows calico-node to manage VPC route table entries for pod CIDRs (BGP native routing)"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateRoute",
+          "ec2:DeleteRoute",
+          "ec2:DescribeRouteTables",
+          "ec2:DescribeInstances"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.cluster_name}-calico-bgp-routes"
+    }
+  )
+}
+
+resource "aws_iam_role_policy_attachment" "calico_bgp_routes" {
+  role       = aws_iam_role.kubeadm_nodes.name
+  policy_arn = aws_iam_policy.calico_bgp_routes.arn
+}
+
 resource "aws_iam_instance_profile" "kubeadm_nodes" {
   name = "${var.cluster_name}-nodes-profile"
   role = aws_iam_role.kubeadm_nodes.name
