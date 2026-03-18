@@ -1,0 +1,42 @@
+# 기존 VPC와 겹치지 않는 /16 블록 선택
+vpc_cidr = "10.30.0.0/16"
+
+# kube-apiserver(6443)에 접근할 bastion/CI CIDR. 없으면 SSM으로만 접근 가능
+management_cidrs = [
+  "10.2.0.0/16",
+]
+
+# 프로덕션은 SSH 비활성화 권장 — SSM Session Manager로 충분
+enable_ssh        = false
+ssh_allowed_cidrs = []
+key_name          = null
+
+# 가용영역 — 정확히 3개 필요 (기본값 유지 권장)
+availability_zones = ["ap-northeast-2a", "ap-northeast-2b", "ap-northeast-2c"]
+
+# 클러스터 내부 전용 private DNS 존 이름.
+# terraform apply 이후 변경 불가 (kube-apiserver TLS SAN에 박힘).
+# 처음 구성 시 결정 후 고정할 것.
+private_dns_zone_name      = "village.internal"
+kube_apiserver_record_name = "k8s-api"
+
+# 외부 공개 도메인 — ALB CNAME을 등록할 대상. ACM 인증서 도메인과 일치해야 함
+public_edge_host   = "edge.example.com"
+cert_manager_email = "platform@example.com"
+
+# ap-northeast-2 리전에 발급된 ACM 인증서 ARN (00-prereqs.md에서 발급)
+alb_certificate_arn = "arn:aws:acm:ap-northeast-2:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+
+# Kubernetes 버전 — 기본값 유지 권장
+kubernetes_version       = "v1.28.0"
+kubernetes_minor_version = "v1.28"
+
+# CIDR 3개가 겹치지 않는지 반드시 확인
+# VPC: 10.30.0.0/16 / Service: 10.96.0.0/12 / Pod: 192.168.0.0/16 — 기본값은 겹침 없음
+pod_network_cidr = "192.168.0.0/16"
+service_cidr     = "10.96.0.0/12"
+cluster_dns_ip   = "10.96.0.10"
+
+cert_manager_acme_server = "https://acme-v02.api.letsencrypt.org/directory"
+calico_version           = "v3.31.0"
+calico_bgp_as_number     = 64512

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euxo pipefail
+
+JOIN_ENV_PATH="$${1:-/opt/kubeadm/rendered/cluster-join.env}"
+JOIN_TEMPLATE_PATH="/opt/kubeadm/templates/kubeadm-join-worker.yaml.tpl"
+RENDERED_JOIN_CONFIG="/opt/kubeadm/rendered/kubeadm-join-worker.yaml"
+
+if [ -f /etc/kubernetes/kubelet.conf ]; then
+  echo "node is already joined"
+  exit 0
+fi
+
+if [ ! -f "$${JOIN_ENV_PATH}" ]; then
+  echo "join env file not found: $${JOIN_ENV_PATH}" >&2
+  exit 1
+fi
+
+set -a
+. "$${JOIN_ENV_PATH}"
+set +a
+
+: "$${BOOTSTRAP_TOKEN:?BOOTSTRAP_TOKEN is required}"
+: "$${CA_CERT_HASH:?CA_CERT_HASH is required}"
+
+NODE_IP="$${NODE_IP:-$(hostname -I | awk '{print $1}')}"
+NODE_NAME="$${NODE_NAME:-$(hostname -s)}"
+
+sed \
+  -e "s|__BOOTSTRAP_TOKEN__|$${BOOTSTRAP_TOKEN}|g" \
+  -e "s|__CA_CERT_HASH__|$${CA_CERT_HASH}|g" \
+  -e "s|__NODE_IP__|$${NODE_IP}|g" \
+  -e "s|__NODE_NAME__|$${NODE_NAME}|g" \
+  "$${JOIN_TEMPLATE_PATH}" >"$${RENDERED_JOIN_CONFIG}"
+
+kubeadm join --config "$${RENDERED_JOIN_CONFIG}" | tee /opt/kubeadm/logs/kubeadm-join-worker.log

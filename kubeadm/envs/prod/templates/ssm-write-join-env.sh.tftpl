@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euxo pipefail
+
+TARGET_PATH="$${1:-/opt/kubeadm/rendered/cluster-join.env}"
+mkdir -p "$(dirname "$${TARGET_PATH}")"
+
+if [ -n "$${JOIN_ENV_B64:-}" ]; then
+  printf '%s' "$${JOIN_ENV_B64}" | base64 -d >"$${TARGET_PATH}"
+elif [ -n "$${JOIN_ENV_TEXT:-}" ]; then
+  printf '%s\n' "$${JOIN_ENV_TEXT}" >"$${TARGET_PATH}"
+else
+  cat >"$${TARGET_PATH}"
+fi
+
+chmod 600 "$${TARGET_PATH}"
+echo "join env written to $${TARGET_PATH}"
