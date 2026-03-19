@@ -155,12 +155,37 @@ resource "aws_route_table" "private" {
   )
 }
 
+resource "aws_eip" "nat" {
+  domain = "vpc"
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.cluster_name}-nat-eip"
+    }
+  )
+}
+
+resource "aws_nat_gateway" "this" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public[var.availability_zones[0]].id
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.cluster_name}-nat-gw"
+    }
+  )
+
+  depends_on = [aws_internet_gateway.this]
+}
+
 resource "aws_route" "private_default" {
   for_each = toset(var.availability_zones)
 
   route_table_id         = aws_route_table.private[each.key].id
   destination_cidr_block = "0.0.0.0/0"
-  gateway_id             = aws_internet_gateway.this.id
+  nat_gateway_id         = aws_nat_gateway.this.id
 }
 
 resource "aws_route_table_association" "control_plane" {
@@ -204,4 +229,8 @@ output "control_plane_subnet_cidrs" {
 
 output "worker_subnet_ids" {
   value = { for az, subnet in aws_subnet.worker : az => subnet.id }
+}
+
+output "nat_gateway_id" {
+  value = aws_nat_gateway.this.id
 }
