@@ -1,0 +1,9 @@
+# shared/kafka/prod/terraform.tfvars.example
+# 실제 사용 시 terraform.tfvars로 복사
+
+#==============================================================================
+# Kafka 설정 (Prod)
+#==============================================================================
+instance_type    = "t3.small"
+root_volume_size = 30
+key_name         = "billage-keypair"
