@@ -188,6 +188,10 @@ resource "aws_instance" "control_plane" {
   monitoring                  = true
   source_dest_check           = false
 
+  lifecycle {
+    ignore_changes = [ami, associate_public_ip_address]
+  }
+
   user_data = each.key == "cp-01" ? templatefile("${path.module}/../../templates/cloud-init-control-plane-init.yaml.tftpl", {
     node_hostname             = each.value.hostname
     private_dns_zone_name     = var.private_dns_zone_name
@@ -255,6 +259,10 @@ resource "aws_instance" "app" {
   monitoring                  = true
   source_dest_check           = false
 
+  lifecycle {
+    ignore_changes = [ami, associate_public_ip_address]
+  }
+
   user_data = templatefile("${path.module}/../../templates/cloud-init-worker-join.yaml.tftpl", {
     node_hostname           = each.value.hostname
     private_dns_zone_name   = var.private_dns_zone_name
@@ -303,6 +311,10 @@ resource "aws_instance" "data" {
   key_name                    = var.enable_ssh ? var.key_name : null
   monitoring                  = true
   source_dest_check           = false
+
+  lifecycle {
+    ignore_changes = [ami, associate_public_ip_address]
+  }
 
   user_data = templatefile("${path.module}/../../templates/cloud-init-worker-join.yaml.tftpl", {
     node_hostname           = each.value.hostname

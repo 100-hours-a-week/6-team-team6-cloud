@@ -1,0 +1,31 @@
+# shared/vpc-peering/kubeadm-prod-to-dev/terraform.tfvars.example
+# 실제 적용 시 terraform.tfvars로 복사 후 사용
+
+aws_region   = "ap-northeast-2"
+project_name = "billage"
+
+# VPC IDs
+kubeadm_prod_vpc_id   = "vpc-0fac8cdbc218d7072"
+kubeadm_prod_vpc_cidr = "10.30.0.0/16"
+dev_vpc_id            = "vpc-0fc6293c57457a2f4"
+dev_vpc_cidr          = "10.0.0.0/16"
+
+# kubeadm-prod Route Tables (private-rt-2a, 2b, 2c + public-rt)
+kubeadm_prod_route_table_ids = [
+  "rtb-0f6d686c836d418a8", # private-rt-2a
+  "rtb-0f279eb09bf62554b", # private-rt-2b
+  "rtb-0a0b2e2c324878741", # private-rt-2c
+]
+
+# dev Route Tables (RDS/Kafka/RabbitMQ private + Qdrant public)
+dev_route_table_ids = [
+  "rtb-04135d823c2479336", # v2-private-rt
+  "rtb-0530ba3397bf92c6b", # v2-private-rt (NAT instance)
+  "rtb-0228dff5355c7f919", # public-rt (Qdrant)
+]
+
+# dev VPC Security Group IDs
+dev_rds_sg_id      = "sg-01ee3860789af9de7" # billage-dev-v2-rds-sg
+dev_kafka_sg_id    = "sg-009c4a120ae44872f" # billage-dev-kafka-sg
+dev_rabbitmq_sg_id = "sg-08a2202cc1a91a725" # billage-dev-rabbitmq-sg
+dev_qdrant_sg_id   = "sg-00978425971d688f5" # billage-dev-qdrant-sg
