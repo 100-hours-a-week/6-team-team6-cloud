@@ -44,6 +44,7 @@ apt-mark hold kubelet kubeadm kubectl
 mkdir -p /etc/containerd
 containerd config default >/etc/containerd/config.toml
 sed -ri 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+sed -ri 's|sandbox_image = "registry.k8s.io/pause:3.8"|sandbox_image = "registry.k8s.io/pause:3.9"|' /etc/containerd/config.toml
 
 systemctl daemon-reload
 systemctl enable --now containerd
