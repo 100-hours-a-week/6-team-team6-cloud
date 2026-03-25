@@ -135,6 +135,14 @@ resource "aws_security_group" "kafka" {
     cidr_blocks = var.management_access_cidrs
   }
 
+  ingress {
+    description = "Kafka UI (management CIDR)"
+    from_port   = 8989
+    to_port     = 8989
+    protocol    = "tcp"
+    cidr_blocks = var.management_access_cidrs
+  }
+
   egress {
     description = "Allow all outbound"
     from_port   = 0

@@ -42,4 +42,17 @@ for i in {1..30}; do
   sleep 5
 done
 
+# Kafka UI - 토픽/consumer group/메시지 웹 관리 도구
+echo "=== Starting Kafka UI ==="
+docker rm -f kafka-ui || true
+
+docker run -d \
+  --name kafka-ui \
+  --restart unless-stopped \
+  -p 8989:8080 \
+  -e DYNAMIC_CONFIG_ENABLED=true \
+  -e KAFKA_CLUSTERS_0_NAME=billage-prod \
+  -e KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=$PRIVATE_IP:9092 \
+  provectuslabs/kafka-ui:latest
+
 echo "=== Kafka bootstrap completed at $(date) ==="

@@ -24,3 +24,8 @@ output "ssm_parameter_name" {
   description = "Kafka bootstrap-servers SSM 파라미터 이름"
   value       = aws_ssm_parameter.kafka_bootstrap_servers.name
 }
+
+output "kafka_ui_url" {
+  description = "Kafka UI URL (Management VPC에서 접근)"
+  value       = "http://${aws_instance.kafka.private_ip}:8989"
+}
