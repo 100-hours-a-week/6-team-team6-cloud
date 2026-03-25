@@ -12,12 +12,14 @@ locals {
   )
 }
 
+data "aws_caller_identity" "current" {}
+
 data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"]
 
   filter {
-    name   = "name"
+    name = "name"
     # Pin to 20260218 build — 20260313 build causes kubelet restart race condition
     # during kubeadm init, leading to etcd/apiserver CrashLoopBackOff.
     # See: docs/runbook/2026-03-18-cp-crashloop-troubleshooting.md
@@ -133,22 +135,44 @@ locals {
   )
 
   platform_bootstrap_script = templatefile("${path.module}/templates/ssm-platform-bootstrap.sh.tftpl", {
-    cluster_name                = var.cluster_name
-    aws_region                  = var.aws_region
-    vpc_id                      = module.network.vpc_id
-    control_plane_endpoint      = "${var.kube_apiserver_record_name}.${var.private_dns_zone_name}"
+    cluster_name                   = var.cluster_name
+    aws_region                     = var.aws_region
+    vpc_id                         = module.network.vpc_id
+    control_plane_endpoint         = "${var.kube_apiserver_record_name}.${var.private_dns_zone_name}"
     calico_kubernetes_service_host = local.calico_kubernetes_service_host
-    private_route_table_ids     = join(",", module.network.private_route_table_ids)
-    public_edge_host            = var.public_edge_host
-    cert_manager_email          = var.cert_manager_email
-    cert_manager_acme_server    = var.cert_manager_acme_server
-    alb_certificate_arn         = var.alb_certificate_arn
-    calico_version              = var.calico_version
-    calico_bgp_as_number        = var.calico_bgp_as_number
-    pod_network_cidr            = var.pod_network_cidr
-    ingress_nginx_chart_version = var.ingress_nginx_chart_version
-    cert_manager_chart_version  = var.cert_manager_chart_version
-    aws_lbc_chart_version       = var.aws_load_balancer_controller_chart_version
+    private_route_table_ids        = join(",", module.network.private_route_table_ids)
+    public_edge_host               = var.public_edge_host
+    cert_manager_email             = var.cert_manager_email
+    cert_manager_acme_server       = var.cert_manager_acme_server
+    alb_certificate_arn            = var.alb_certificate_arn
+    calico_version                 = var.calico_version
+    calico_bgp_as_number           = var.calico_bgp_as_number
+    pod_network_cidr               = var.pod_network_cidr
+    ingress_nginx_chart_version    = var.ingress_nginx_chart_version
+    cert_manager_chart_version     = var.cert_manager_chart_version
+    aws_lbc_chart_version          = var.aws_load_balancer_controller_chart_version
+  })
+
+  rds_fault_injection_bootstrap_script = templatefile("${path.module}/templates/ssm-rds-fault-injection-bootstrap.sh.tftpl", {
+    cluster_name        = var.cluster_name
+    namespace           = var.rds_fault_injection_namespace
+    toxiproxy_image     = var.rds_fault_injection_toxiproxy_image
+    proxy_name          = var.rds_fault_injection_proxy_name
+    listen_port         = var.rds_fault_injection_listen_port
+    upstream_host       = var.rds_fault_injection_upstream_host
+    upstream_port       = var.rds_fault_injection_upstream_port
+    rds_egress_cidr     = var.rds_fault_injection_upstream_cidr
+    probe_path          = var.rds_fault_injection_probe_path
+    spring_service_name = var.rds_fault_injection_spring_service_name
+    spring_service_port = var.rds_fault_injection_spring_service_port
+  })
+
+  rds_fault_injection_rollout_script = templatefile("${path.module}/templates/ssm-rds-fault-injection-rollout.sh.tftpl", {
+    namespace       = var.rds_fault_injection_namespace
+    deployment_name = var.rds_fault_injection_spring_deployment_name
+    container_name  = var.rds_fault_injection_spring_container_name
+    image           = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/${var.rds_fault_injection_ecr_repository}:${var.rds_fault_injection_image_tag}"
+    datasource_url  = var.rds_fault_injection_datasource_url
   })
 }
 
@@ -175,6 +199,60 @@ resource "aws_ssm_document" "platform_bootstrap" {
     local.common_tags,
     {
       Name = "${var.cluster_name}-platform-bootstrap"
+    }
+  )
+}
+
+resource "aws_ssm_document" "rds_fault_injection_bootstrap" {
+  name            = "${var.cluster_name}-rds-fault-injection-bootstrap"
+  document_type   = "Command"
+  document_format = "YAML"
+
+  content = yamlencode({
+    schemaVersion = "2.2"
+    description   = "Deploy Toxiproxy and supporting policies/scripts for RDS fault injection experiments on the kubeadm prod cluster."
+    mainSteps = [
+      {
+        action = "aws:runShellScript"
+        name   = "rdsFaultInjectionBootstrap"
+        inputs = {
+          runCommand = split("\n", local.rds_fault_injection_bootstrap_script)
+        }
+      }
+    ]
+  })
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "${var.cluster_name}-rds-fault-injection-bootstrap"
+    }
+  )
+}
+
+resource "aws_ssm_document" "rds_fault_injection_rollout" {
+  name            = "${var.cluster_name}-rds-fault-injection-rollout"
+  document_type   = "Command"
+  document_format = "YAML"
+
+  content = yamlencode({
+    schemaVersion = "2.2"
+    description   = "Patch the Spring deployment to pull the kube_latest image for RDS fault injection experiments."
+    mainSteps = [
+      {
+        action = "aws:runShellScript"
+        name   = "rdsFaultInjectionRollout"
+        inputs = {
+          runCommand = split("\n", local.rds_fault_injection_rollout_script)
+        }
+      }
+    ]
+  })
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "${var.cluster_name}-rds-fault-injection-rollout"
     }
   )
 }

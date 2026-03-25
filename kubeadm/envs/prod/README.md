@@ -134,3 +134,42 @@ aws ssm send-command \
 - `platform-bootstrap.sh`는 cluster add-on 설치와 기본 정책 적용을 함께 수행한다. cert-manager `Certificate`는 DNS가 연결되기 전까지 pending일 수 있다.
 - 외부 TLS는 ALB의 ACM certificate로 종료되고, cert-manager는 nginx ingress용 cluster certificate 자산을 관리한다.
 - `aws-load-balancer-controller`는 IRSA가 아니라 노드 instance profile을 사용한다. 그래서 현재 스택은 노드 IAM role에 공식 controller 정책을 추가한다.
+
+## RDS Fault Injection 지원
+
+이 스택은 Terraform이 생성하는 별도 SSM Document로 `RDS fault injection` 준비 자원을 배포할 수 있다.
+
+- SSM Document: `billage-kubeadm-prod-rds-fault-injection-bootstrap`
+- SSM Document: `billage-kubeadm-prod-rds-fault-injection-rollout`
+- 배포 자원:
+  - `billage-app` 네임스페이스의 `toxiproxy-rds` Deployment / Service
+  - Spring app -> Toxiproxy 경로용 NetworkPolicy
+  - Toxiproxy -> RDS egress용 NetworkPolicy
+  - 샘플 `k6` 스크립트 ConfigMap
+
+실행 전제:
+
+- `rds_fault_injection_upstream_host`에 실제 RDS endpoint가 설정돼 있어야 한다.
+- `rds_fault_injection_datasource_url`에 `toxiproxy-rds.billage-app.svc.cluster.local:3306`을 가리키는 JDBC URL이 설정돼 있어야 한다.
+- `rds_fault_injection_rollout` 문서는 Spring deployment 이미지를 `${account}.dkr.ecr.${region}.amazonaws.com/${repo}:kube_latest`로 교체하고 `imagePullPolicy: Always`를 강제한다.
+  - 현재 클러스터 배포 기준으로 datasource override는 `DEV_DB_URL` env를 갱신한다.
+
+실행 예시:
+
+```bash
+cd kubeadm/envs/prod
+terraform output rds_fault_injection_bootstrap_ssm_document_name
+
+CP01=$(terraform output -json control_plane_instance_ids | jq -r '."cp-01"')
+DOC=$(terraform output -raw rds_fault_injection_bootstrap_ssm_document_name)
+
+aws ssm send-command \
+  --document-name "$DOC" \
+  --instance-ids "$CP01"
+
+ROLLOUT_DOC=$(terraform output -raw rds_fault_injection_rollout_ssm_document_name)
+
+aws ssm send-command \
+  --document-name "$ROLLOUT_DOC" \
+  --instance-ids "$CP01"
+```

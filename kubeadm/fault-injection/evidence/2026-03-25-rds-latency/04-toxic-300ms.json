@@ -1,0 +1,5 @@
+pod/fi-toxic created
+pod/fi-toxic condition met
+{"attributes":{"latency":300,"jitter":50},"name":"latency_downstream","type":"latency","stream":"downstream","toxicity":1}
+{"name":"rds-upstream","listen":"[::]:3306","upstream":"billage-dev-v2-mysql.cpigi2qskxj3.ap-northeast-2.rds.amazonaws.com:3306","enabled":true,"Logger":{},"toxics":[{"attributes":{"latency":300,"jitter":50},"name":"latency_downstream","type":"latency","stream":"downstream","toxicity":1}]}
+

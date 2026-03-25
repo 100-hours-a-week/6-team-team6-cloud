@@ -108,6 +108,16 @@ output "platform_bootstrap_ssm_document_name" {
   value       = aws_ssm_document.platform_bootstrap.name
 }
 
+output "rds_fault_injection_bootstrap_ssm_document_name" {
+  description = "SSM document name used to deploy Toxiproxy and supporting resources for RDS fault injection"
+  value       = aws_ssm_document.rds_fault_injection_bootstrap.name
+}
+
+output "rds_fault_injection_rollout_ssm_document_name" {
+  description = "SSM document name used to patch the Spring deployment to the kube_latest image for RDS fault injection"
+  value       = aws_ssm_document.rds_fault_injection_rollout.name
+}
+
 output "nat_instance_id" {
   description = "NAT Instance ID — FIS chaos experiment target"
   value       = module.network.nat_instance_id

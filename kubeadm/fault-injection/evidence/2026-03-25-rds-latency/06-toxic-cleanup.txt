@@ -1,0 +1,8 @@
+pod/fi-toxic-cleanup created
+pod/fi-toxic-cleanup condition met
+
+{"name":"rds-upstream","listen":"[::]:3306","upstream":"billage-dev-v2-mysql.cpigi2qskxj3.ap-northeast-2.rds.amazonaws.com:3306","enabled":true,"Logger":{},"toxics":[]}
+
+Interpretation:
+- 실험 종료 후 toxic이 제거된 상태를 확인했다.
+

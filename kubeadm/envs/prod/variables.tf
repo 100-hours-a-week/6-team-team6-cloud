@@ -202,3 +202,93 @@ variable "chaos_alarm_email" {
   type        = string
   default     = ""
 }
+
+variable "rds_fault_injection_namespace" {
+  description = "Namespace where RDS fault injection support resources are deployed"
+  type        = string
+  default     = "billage-app"
+}
+
+variable "rds_fault_injection_toxiproxy_image" {
+  description = "Container image used for the Toxiproxy deployment"
+  type        = string
+  default     = "ghcr.io/shopify/toxiproxy:2.12.0"
+}
+
+variable "rds_fault_injection_proxy_name" {
+  description = "Logical Toxiproxy proxy name for the RDS upstream"
+  type        = string
+  default     = "rds-upstream"
+}
+
+variable "rds_fault_injection_listen_port" {
+  description = "Listen port exposed by Toxiproxy for the RDS proxy"
+  type        = number
+  default     = 3306
+}
+
+variable "rds_fault_injection_upstream_host" {
+  description = "RDS hostname that Toxiproxy forwards traffic to"
+  type        = string
+  default     = ""
+}
+
+variable "rds_fault_injection_upstream_port" {
+  description = "RDS port that Toxiproxy forwards traffic to"
+  type        = number
+  default     = 3306
+}
+
+variable "rds_fault_injection_upstream_cidr" {
+  description = "CIDR allowed for Toxiproxy egress toward the upstream RDS network"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "rds_fault_injection_probe_path" {
+  description = "HTTP path used by the sample k6 script to probe the Spring service"
+  type        = string
+  default     = "/actuator/health"
+}
+
+variable "rds_fault_injection_spring_service_name" {
+  description = "Spring service name referenced by the sample k6 script"
+  type        = string
+  default     = "spring-boot"
+}
+
+variable "rds_fault_injection_spring_service_port" {
+  description = "Spring service port referenced by the sample k6 script"
+  type        = number
+  default     = 8080
+}
+
+variable "rds_fault_injection_spring_deployment_name" {
+  description = "Spring deployment name that should be rolled to the kube fault injection image"
+  type        = string
+  default     = "spring-boot"
+}
+
+variable "rds_fault_injection_spring_container_name" {
+  description = "Spring container name inside the deployment that should be updated"
+  type        = string
+  default     = "spring-boot"
+}
+
+variable "rds_fault_injection_ecr_repository" {
+  description = "ECR repository that stores the Spring backend image used by the kube fault injection deployment"
+  type        = string
+  default     = "billage-be"
+}
+
+variable "rds_fault_injection_image_tag" {
+  description = "ECR image tag that the kube fault injection rollout should pull"
+  type        = string
+  default     = "kube_latest"
+}
+
+variable "rds_fault_injection_datasource_url" {
+  description = "Datasource URL injected into the Spring deployment for RDS fault injection. In the current cluster this overrides DEV_DB_URL and should point to the toxiproxy-rds service."
+  type        = string
+  default     = ""
+}
