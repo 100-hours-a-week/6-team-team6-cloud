@@ -1,0 +1,37 @@
+{
+  "description": "Billage kubeadm NAT Instance 완전 중단 — 카오스 실험 시나리오 A",
+  "targets": {
+    "natInstance": {
+      "resourceType": "aws:ec2:instance",
+      "resourceTags": {
+        "Name": "billage-kubeadm-prod-nat",
+        "Role": "nat"
+      },
+      "selectionMode": "ALL"
+    }
+  },
+  "actions": {
+    "stopNatInstance": {
+      "actionId": "aws:ec2:stop-instances",
+      "description": "NAT Instance 강제 중단 (10분 후 자동 재시작)",
+      "parameters": {
+        "startInstancesAfterDuration": "PT10M"
+      },
+      "targets": {
+        "Instances": "natInstance"
+      }
+    }
+  },
+  "stopConditions": [
+    {
+      "source": "aws:cloudwatch:alarm",
+      "value": "arn:aws:cloudwatch:ap-northeast-2:ACCOUNT_ID:alarm:billage-kubeadm-prod-chaos-emergency-stop"
+    }
+  ],
+  "roleArn": "arn:aws:iam::ACCOUNT_ID:role/billage-kubeadm-prod-fis-role",
+  "tags": {
+    "Experiment": "nat-instance-stop",
+    "Environment": "kubeadm-prod",
+    "Phase": "before-improvement"
+  }
+}
