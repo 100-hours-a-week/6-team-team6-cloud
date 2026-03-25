@@ -155,25 +155,97 @@ resource "aws_route_table" "private" {
   )
 }
 
-resource "aws_eip" "nat" {
-  domain = "vpc"
+# -----------------------------------------------------------------------------
+# NAT Instance (replaces NAT Gateway for cost optimization + chaos engineering)
+# - t3.nano: ~$3.80/month (vs NAT Gateway ~$32/month)
+# - FIS aws:ec2:stop-instances 대상 (Role=nat 태그로 타겟팅)
+# - SPOF — 카오스 실험으로 영향 범위 검증 후 ASG 자동 복구 적용 예정
+# -----------------------------------------------------------------------------
 
-  tags = merge(
-    var.tags,
-    {
-      Name = "${var.cluster_name}-nat-eip"
-    }
-  )
+data "aws_ami" "nat" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-*-x86_64"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
 }
 
-resource "aws_nat_gateway" "this" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public[var.availability_zones[0]].id
+resource "aws_security_group" "nat" {
+  name_prefix = "${var.cluster_name}-nat-"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description = "All traffic from private subnets (control-plane + worker)"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = concat(
+      values(local.control_plane_subnet_cidrs),
+      values(local.worker_subnet_cidrs)
+    )
+  }
+
+  egress {
+    description = "All outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
   tags = merge(
     var.tags,
     {
-      Name = "${var.cluster_name}-nat-gw"
+      Name = "${var.cluster_name}-nat-sg"
+    }
+  )
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_instance" "nat" {
+  ami                    = data.aws_ami.nat.id
+  instance_type          = "t3.nano"
+  subnet_id              = aws_subnet.public[var.availability_zones[0]].id
+  vpc_security_group_ids = [aws_security_group.nat.id]
+  source_dest_check      = false # NAT Instance 필수: 자기 IP가 아닌 패킷도 전달
+
+  user_data = <<-USERDATA
+    #!/bin/bash
+    set -e
+
+    # IP forwarding 활성화
+    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+    sysctl -w net.ipv4.ip_forward=1
+
+    # iptables NAT 설정 — VPC 전체 CIDR에 대해 MASQUERADE
+    PUB_IF=$(ip route | grep default | awk '{print $5}')
+    iptables -t nat -A POSTROUTING -o $PUB_IF -s ${var.vpc_cidr} -j MASQUERADE
+    iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    iptables -A FORWARD -s ${var.vpc_cidr} -o $PUB_IF -j ACCEPT
+
+    # iptables 영구 저장
+    yum install -y iptables-services 2>/dev/null || true
+    iptables-save > /etc/sysconfig/iptables 2>/dev/null || true
+    systemctl enable iptables 2>/dev/null || true
+  USERDATA
+
+  monitoring = true # Detailed CloudWatch (1분 간격) — 카오스 실험 관측용
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.cluster_name}-nat"
+      Role = "nat" # FIS 타겟팅용 태그
     }
   )
 
@@ -185,7 +257,7 @@ resource "aws_route" "private_default" {
 
   route_table_id         = aws_route_table.private[each.key].id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.this.id
+  network_interface_id   = aws_instance.nat.primary_network_interface_id
 }
 
 resource "aws_route_table_association" "control_plane" {
@@ -231,6 +303,12 @@ output "worker_subnet_ids" {
   value = { for az, subnet in aws_subnet.worker : az => subnet.id }
 }
 
-output "nat_gateway_id" {
-  value = aws_nat_gateway.this.id
+output "nat_instance_id" {
+  description = "NAT Instance ID (FIS chaos experiment target)"
+  value       = aws_instance.nat.id
+}
+
+output "nat_instance_private_ip" {
+  description = "NAT Instance private IP"
+  value       = aws_instance.nat.private_ip
 }

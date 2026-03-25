@@ -1,0 +1,134 @@
+# k6 부하 테스트 — NAT Instance 카오스 실험용
+#
+# 사용법:
+#   kubectl apply -f k6-load-test.yaml
+#   # 3분 대기 (Steady State 수집)
+#   # FIS 실험 트리거
+#   # 테스트 완료 후 결과 확인:
+#   kubectl logs job/k6-nat-chaos-load -n billage-app
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-nat-chaos-script
+  namespace: billage-app
+data:
+  nat-chaos-test.js: |
+    import http from 'k6/http';
+    import { check, sleep } from 'k6';
+    import { Rate, Trend, Counter } from 'k6/metrics';
+
+    // 커스텀 메트릭
+    const postListErrors = new Rate('post_list_errors');
+    const recommendErrors = new Rate('recommend_errors');
+    const postListDuration = new Trend('post_list_duration');
+    const recommendDuration = new Trend('recommend_duration');
+    const healthErrors = new Counter('health_check_errors');
+    const loginErrors = new Counter('login_errors');
+
+    export const options = {
+      stages: [
+        { duration: '3m', target: 20 },   // Ramp-up → Steady State
+        { duration: '12m', target: 20 },   // NAT 중단 구간 (T+3에 FIS 트리거)
+        { duration: '5m', target: 20 },    // 복구 확인
+      ],
+    };
+
+    const BASE_URL = 'http://spring-boot.billage-app.svc.cluster.local:8080';
+
+    // ★ 테스트 시작 시 로그인하여 JWT 획득
+    export function setup() {
+      // 로그인 (공개 엔드포인트, NAT 무관)
+      const loginRes = http.post(`${BASE_URL}/auth/login`,
+        JSON.stringify({
+          loginId: __ENV.TEST_LOGIN_ID || 'admin1234',
+          password: __ENV.TEST_PASSWORD || 'Password1234!'
+        }),
+        { headers: { 'Content-Type': 'application/json' }, timeout: '10s' }
+      );
+
+      if (loginRes.status === 200) {
+        const body = JSON.parse(loginRes.body);
+        console.log(`Login OK — userId: ${body.userId}`);
+        return {
+          token: body.accessToken,
+          groupId: __ENV.TEST_GROUP_ID || '1',
+          postId: __ENV.TEST_POST_ID || '97',
+        };
+      }
+
+      // 로그인 실패 시에도 테스트 계속 (비인증 엔드포인트만 테스트)
+      console.warn(`Login failed: ${loginRes.status} - testing public endpoints only`);
+      return { token: null, groupId: '1', postId: '1' };
+    }
+
+    export default function (data) {
+      const headers = data.token
+        ? { 'Authorization': `Bearer ${data.token}`, 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' };
+
+      // 1. 헬스체크 (공개, NAT 무관 — DB/내부 의존만)
+      const healthRes = http.get(`${BASE_URL}/actuator/health`, { timeout: '5s' });
+      const healthOk = check(healthRes, { 'health_200': (r) => r.status === 200 });
+      if (!healthOk) healthErrors.add(1);
+
+      // 2. 게시글 리스트 조회 (JWT 필요, DB만 → NAT 무관이어야 함)
+      if (data.token) {
+        const postListRes = http.get(
+          `${BASE_URL}/groups/${data.groupId}/posts`,
+          { headers: headers, timeout: '10s' }
+        );
+        postListDuration.add(postListRes.timings.duration);
+        const postOk = check(postListRes, {
+          'post_list_2xx': (r) => r.status >= 200 && r.status < 300,
+        });
+        postListErrors.add(postOk ? 0 : 1);
+
+        // 3. ★ AI 추천 (JWT 필요, RunPod 외부 호출 → NAT 필요 → 핵심 관찰 대상)
+        const recRes = http.get(
+          `${BASE_URL}/posts/${data.postId}/recommendations`,
+          { headers: headers, timeout: '10s' }
+        );
+        recommendDuration.add(recRes.timings.duration);
+        const recOk = check(recRes, {
+          'recommend_2xx': (r) => r.status >= 200 && r.status < 300,
+        });
+        recommendErrors.add(recOk ? 0 : 1);
+
+        // 4. 내 정보 조회 (JWT 필요, DB만 → NAT 무관)
+        http.get(`${BASE_URL}/users/me`, { headers: headers, timeout: '5s' });
+      }
+
+      sleep(1);
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-nat-chaos-load
+  namespace: billage-app
+spec:
+  template:
+    spec:
+      containers:
+        - name: k6
+          image: grafana/k6:latest
+          command: ['k6', 'run', '/scripts/nat-chaos-test.js']
+          volumeMounts:
+            - name: k6-script
+              mountPath: /scripts
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: k6-script
+          configMap:
+            name: k6-nat-chaos-script
+      restartPolicy: Never
+      nodeSelector:
+        workload-plane: app
+  backoffLimit: 0

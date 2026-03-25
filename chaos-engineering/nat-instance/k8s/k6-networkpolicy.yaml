@@ -1,0 +1,53 @@
+# k6 부하 테스트 Pod가 billage-app 내 서비스에 접근할 수 있도록 허용
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-k6-to-services
+  namespace: billage-app
+spec:
+  podSelector:
+    matchLabels:
+      job-name: k6-nat-chaos-load
+  policyTypes:
+    - Egress
+  egress:
+    # spring-boot, fastapi 등 같은 네임스페이스 서비스 접근
+    - to:
+        - podSelector: {}
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 5000
+          protocol: TCP
+        - port: 3000
+          protocol: TCP
+    # DNS 조회
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# k6 Pod로부터의 ingress를 서비스 Pod가 수락
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-k6-ingress
+  namespace: billage-app
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              job-name: k6-nat-chaos-load
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 5000
+          protocol: TCP
+        - port: 3000
+          protocol: TCP
