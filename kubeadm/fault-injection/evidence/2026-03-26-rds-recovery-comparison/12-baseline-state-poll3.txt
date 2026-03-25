@@ -1,0 +1,14 @@
+NAME          REFERENCE                TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+spring-boot   Deployment/spring-boot   6%/70%    3         10        7          5d12h
+NAME          READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS    IMAGES                                                                     SELECTOR
+spring-boot   4/7     7            4           5d12h   spring-boot   988319239270.dkr.ecr.ap-northeast-2.amazonaws.com/billage-be:kube_latest   app=spring-boot,app.kubernetes.io/instance=spring-boot
+NAME                           READY   STATUS    RESTARTS        AGE     IP               NODE                          NOMINATED NODE   READINESS GATES
+spring-boot-55b4d4d878-27ckk   0/1     Pending   0               6m57s   <none>           <none>                        <none>           <none>
+spring-boot-55b4d4d878-5bjnm   1/1     Running   1 (5m12s ago)   6m57s   192.168.235.51   billage-kubeadm-prod-app-03   <none>           <none>
+spring-boot-55b4d4d878-7tb26   1/1     Running   11 (5m7s ago)   8h      192.168.44.43    billage-kubeadm-prod-app-04   <none>           <none>
+spring-boot-55b4d4d878-ktntc   0/1     Pending   0               6m57s   <none>           <none>                        <none>           <none>
+spring-boot-55b4d4d878-q57b9   1/1     Running   10 (5m2s ago)   3h6m    192.168.138.35   billage-kubeadm-prod-app-02   <none>           <none>
+spring-boot-55b4d4d878-rxw4k   1/1     Running   11 (5m1s ago)   8h      192.168.75.228   billage-kubeadm-prod-app-01   <none>           <none>
+spring-boot-55b4d4d878-vp75n   0/1     Pending   0               6m57s   <none>           <none>                        <none>           <none>
+200 0.284938
+

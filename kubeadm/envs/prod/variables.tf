@@ -292,3 +292,45 @@ variable "rds_fault_injection_datasource_url" {
   type        = string
   default     = ""
 }
+
+variable "rds_fault_injection_probe_liveness_path" {
+  description = "Liveness probe path applied by the resilience patch"
+  type        = string
+  default     = "/actuator/health/liveness"
+}
+
+variable "rds_fault_injection_probe_readiness_path" {
+  description = "Readiness probe path applied by the resilience patch"
+  type        = string
+  default     = "/actuator/health/readiness"
+}
+
+variable "rds_fault_injection_probe_startup_path" {
+  description = "Startup probe path applied by the resilience patch"
+  type        = string
+  default     = "/actuator/health/liveness"
+}
+
+variable "rds_fault_injection_probe_timeout_seconds" {
+  description = "Timeout seconds applied to all Spring HTTP probes by the resilience patch"
+  type        = number
+  default     = 5
+}
+
+variable "rds_fault_injection_startup_failure_threshold" {
+  description = "Startup probe failure threshold used by the resilience patch"
+  type        = number
+  default     = 60
+}
+
+variable "rds_fault_injection_spring_request_cpu" {
+  description = "CPU request applied to the Spring container by the resilience patch"
+  type        = string
+  default     = "300m"
+}
+
+variable "rds_fault_injection_hpa_scale_down_stabilization_window_seconds" {
+  description = "Scale-down stabilization window applied to the Spring HPA by the resilience patch"
+  type        = number
+  default     = 60
+}

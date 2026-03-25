@@ -1,0 +1,43 @@
+{
+    "CommandInvocations": [
+        {
+            "CommandId": "9129a3b9-bbac-4625-8ad5-20ce0434eed0",
+            "InstanceId": "i-09a68ff072a74da85",
+            "InstanceName": "billage-kubeadm-prod-cp-01.village.internal",
+            "Comment": "postfix late recovery api and toxic check",
+            "DocumentName": "AWS-RunShellScript",
+            "DocumentVersion": "$DEFAULT",
+            "RequestedDateTime": "2026-03-26T02:53:53.379000+09:00",
+            "Status": "Success",
+            "StatusDetails": "Success",
+            "StandardOutputUrl": "",
+            "StandardErrorUrl": "",
+            "CommandPlugins": [
+                {
+                    "Name": "aws:runShellScript",
+                    "Status": "Success",
+                    "StatusDetails": "Success",
+                    "ResponseCode": 0,
+                    "ResponseStartDateTime": "2026-03-26T02:53:53.500000+09:00",
+                    "ResponseFinishDateTime": "2026-03-26T02:53:53.780000+09:00",
+                    "Output": "2026-03-25T17:53:53Z\n{\"name\":\"rds-upstream\",\"listen\":\"[::]:3306\",\"upstream\":\"billage-dev-v2-mysql.cpigi2qskxj3.ap-northeast-2.rds.amazonaws.com:3306\",\"enabled\":true,\"Logger\":{},\"toxics\":[]}200 0.072684\n",
+                    "StandardOutputUrl": "",
+                    "StandardErrorUrl": "",
+                    "OutputS3Region": "ap-northeast-2",
+                    "OutputS3BucketName": "",
+                    "OutputS3KeyPrefix": ""
+                }
+            ],
+            "ServiceRole": "",
+            "NotificationConfig": {
+                "NotificationArn": "",
+                "NotificationEvents": [],
+                "NotificationType": ""
+            },
+            "CloudWatchOutputConfig": {
+                "CloudWatchLogGroupName": "",
+                "CloudWatchOutputEnabled": false
+            }
+        }
+    ]
+}

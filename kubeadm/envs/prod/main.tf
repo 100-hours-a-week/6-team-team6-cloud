@@ -174,6 +174,19 @@ locals {
     image           = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/${var.rds_fault_injection_ecr_repository}:${var.rds_fault_injection_image_tag}"
     datasource_url  = var.rds_fault_injection_datasource_url
   })
+
+  rds_fault_injection_resilience_patch_script = templatefile("${path.module}/templates/ssm-rds-fault-injection-resilience-patch.sh.tftpl", {
+    namespace                 = var.rds_fault_injection_namespace
+    deployment_name           = var.rds_fault_injection_spring_deployment_name
+    container_name            = var.rds_fault_injection_spring_container_name
+    liveness_path             = var.rds_fault_injection_probe_liveness_path
+    readiness_path            = var.rds_fault_injection_probe_readiness_path
+    startup_path              = var.rds_fault_injection_probe_startup_path
+    probe_timeout_seconds     = var.rds_fault_injection_probe_timeout_seconds
+    startup_failure_threshold = var.rds_fault_injection_startup_failure_threshold
+    request_cpu               = var.rds_fault_injection_spring_request_cpu
+    hpa_scale_down_window     = var.rds_fault_injection_hpa_scale_down_stabilization_window_seconds
+  })
 }
 
 resource "aws_ssm_document" "platform_bootstrap" {
@@ -253,6 +266,33 @@ resource "aws_ssm_document" "rds_fault_injection_rollout" {
     local.common_tags,
     {
       Name = "${var.cluster_name}-rds-fault-injection-rollout"
+    }
+  )
+}
+
+resource "aws_ssm_document" "rds_fault_injection_resilience_patch" {
+  name            = "${var.cluster_name}-rds-fault-injection-resilience-patch"
+  document_type   = "Command"
+  document_format = "YAML"
+
+  content = yamlencode({
+    schemaVersion = "2.2"
+    description   = "Patch Spring probes, resource requests, and HPA scale-down behavior to improve recovery during RDS fault injection experiments."
+    mainSteps = [
+      {
+        action = "aws:runShellScript"
+        name   = "rdsFaultInjectionResiliencePatch"
+        inputs = {
+          runCommand = split("\n", local.rds_fault_injection_resilience_patch_script)
+        }
+      }
+    ]
+  })
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "${var.cluster_name}-rds-fault-injection-resilience-patch"
     }
   )
 }

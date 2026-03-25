@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export KUBECONFIG=/etc/kubernetes/admin.conf
+
+NAMESPACE="${namespace}"
+DEPLOYMENT_NAME="${deployment_name}"
+CONTAINER_NAME="${container_name}"
+LIVENESS_PATH="${liveness_path}"
+READINESS_PATH="${readiness_path}"
+STARTUP_PATH="${startup_path}"
+PROBE_TIMEOUT_SECONDS="${probe_timeout_seconds}"
+STARTUP_FAILURE_THRESHOLD="${startup_failure_threshold}"
+REQUEST_CPU="${request_cpu}"
+HPA_SCALE_DOWN_WINDOW="${hpa_scale_down_window}"
+
+wait_for_api() {
+  until kubectl version --request-timeout=5s >/dev/null 2>&1; do
+    echo "waiting for kube-apiserver"
+    sleep 5
+  done
+}
+
+validate_target() {
+  kubectl get deployment "$${DEPLOYMENT_NAME}" -n "$${NAMESPACE}" >/dev/null
+  kubectl get hpa "$${DEPLOYMENT_NAME}" -n "$${NAMESPACE}" >/dev/null
+}
+
+patch_deployment() {
+  kubectl patch deployment "$${DEPLOYMENT_NAME}" -n "$${NAMESPACE}" --type='strategic' -p "{
+    \"spec\": {
+      \"template\": {
+        \"metadata\": {
+          \"annotations\": {
+            \"fault-injection/recovery-tuned-at\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+          }
+        },
+        \"spec\": {
+          \"containers\": [
+            {
+              \"name\": \"$${CONTAINER_NAME}\",
+              \"env\": [
+                {\"name\": \"MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED\", \"value\": \"true\"},
+                {\"name\": \"MANAGEMENT_HEALTH_LIVENESSSTATE_ENABLED\", \"value\": \"true\"},
+                {\"name\": \"MANAGEMENT_HEALTH_READINESSSTATE_ENABLED\", \"value\": \"true\"}
+              ],
+              \"resources\": {
+                \"requests\": {
+                  \"cpu\": \"$${REQUEST_CPU}\",
+                  \"memory\": \"1Gi\"
+                },
+                \"limits\": {
+                  \"cpu\": \"2\",
+                  \"memory\": \"2Gi\"
+                }
+              },
+              \"livenessProbe\": {
+                \"httpGet\": {
+                  \"path\": \"$${LIVENESS_PATH}\",
+                  \"port\": 8080,
+                  \"scheme\": \"HTTP\"
+                },
+                \"initialDelaySeconds\": 10,
+                \"periodSeconds\": 20,
+                \"timeoutSeconds\": $${PROBE_TIMEOUT_SECONDS},
+                \"failureThreshold\": 3,
+                \"successThreshold\": 1
+              },
+              \"readinessProbe\": {
+                \"httpGet\": {
+                  \"path\": \"$${READINESS_PATH}\",
+                  \"port\": 8080,
+                  \"scheme\": \"HTTP\"
+                },
+                \"initialDelaySeconds\": 5,
+                \"periodSeconds\": 10,
+                \"timeoutSeconds\": $${PROBE_TIMEOUT_SECONDS},
+                \"failureThreshold\": 3,
+                \"successThreshold\": 1
+              },
+              \"startupProbe\": {
+                \"httpGet\": {
+                  \"path\": \"$${STARTUP_PATH}\",
+                  \"port\": 8080,
+                  \"scheme\": \"HTTP\"
+                },
+                \"initialDelaySeconds\": 10,
+                \"periodSeconds\": 5,
+                \"timeoutSeconds\": $${PROBE_TIMEOUT_SECONDS},
+                \"failureThreshold\": $${STARTUP_FAILURE_THRESHOLD},
+                \"successThreshold\": 1
+              }
+            }
+          ]
+        }
+      }
+    }
+  }"
+}
+
+patch_hpa() {
+  kubectl patch hpa "$${DEPLOYMENT_NAME}" -n "$${NAMESPACE}" --type='merge' -p "{
+    \"spec\": {
+      \"behavior\": {
+        \"scaleDown\": {
+          \"stabilizationWindowSeconds\": $${HPA_SCALE_DOWN_WINDOW}
+        }
+      }
+    }
+  }"
+}
+
+print_summary() {
+  kubectl get deployment "$${DEPLOYMENT_NAME}" -n "$${NAMESPACE}" -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{" requests.cpu="}{.resources.requests.cpu}{" liveness="}{.livenessProbe.httpGet.path}{" readiness="}{.readinessProbe.httpGet.path}{" startup="}{.startupProbe.httpGet.path}{" timeout="}{.livenessProbe.timeoutSeconds}{"\n"}{end}'
+  kubectl get hpa "$${DEPLOYMENT_NAME}" -n "$${NAMESPACE}" -o jsonpath='scaleDownWindow={.spec.behavior.scaleDown.stabilizationWindowSeconds}{"\n"}'
+}
+
+wait_for_api
+validate_target
+patch_deployment
+patch_hpa
+kubectl rollout status deployment/"$${DEPLOYMENT_NAME}" -n "$${NAMESPACE}" --timeout=10m
+print_summary
