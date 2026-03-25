@@ -196,3 +196,9 @@ variable "aws_load_balancer_controller_chart_version" {
   type        = string
   default     = "3.1.0"
 }
+
+variable "chaos_alarm_email" {
+  description = "Email address for chaos engineering experiment notifications"
+  type        = string
+  default     = ""
+}

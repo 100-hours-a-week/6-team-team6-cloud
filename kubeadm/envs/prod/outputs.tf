@@ -107,3 +107,8 @@ output "platform_bootstrap_ssm_document_name" {
   description = "SSM document name used to apply Calico, namespaces, policies, and edge controllers after all nodes join"
   value       = aws_ssm_document.platform_bootstrap.name
 }
+
+output "nat_instance_id" {
+  description = "NAT Instance ID — FIS chaos experiment target"
+  value       = module.network.nat_instance_id
+}

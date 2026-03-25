@@ -115,6 +115,16 @@ module "api_endpoint" {
   tags                       = local.common_tags
 }
 
+module "chaos" {
+  source = "./modules/chaos"
+
+  cluster_name    = var.cluster_name
+  env             = var.env
+  nat_instance_id = module.network.nat_instance_id
+  alarm_email     = var.chaos_alarm_email
+  tags            = local.common_tags
+}
+
 locals {
   calico_kubernetes_service_host = lookup(
     module.compute.control_plane_private_ips,
