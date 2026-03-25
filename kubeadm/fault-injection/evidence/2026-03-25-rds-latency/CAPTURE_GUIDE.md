@@ -62,3 +62,65 @@ curl -sS -o /dev/null -w 'code=%{http_code} total=%{time_total}\n' http://127.0.
 - baseline: [`03-baseline-health.txt`](/Users/cho/IdeaProjects/6-team-team6-cloud/kubeadm/fault-injection/evidence/2026-03-25-rds-latency/03-baseline-health.txt)
 - injected: [`05-injected-health-300ms.txt`](/Users/cho/IdeaProjects/6-team-team6-cloud/kubeadm/fault-injection/evidence/2026-03-25-rds-latency/05-injected-health-300ms.txt)
 - toxic cleanup: [`06-toxic-cleanup.txt`](/Users/cho/IdeaProjects/6-team-team6-cloud/kubeadm/fault-injection/evidence/2026-03-25-rds-latency/06-toxic-cleanup.txt)
+
+## Grafana 캡처 포인트
+
+다음 대시보드 파일을 기준으로 실제 Grafana에서 같은 패널을 열어 캡처한다.
+
+### 1. App Observability
+
+- 대시보드 파일: [`app-observability-v2.json`](/Users/cho/IdeaProjects/6-team-team6-cloud/monitoring/server/configs/grafana/dashboards/app-observability-v2.json)
+- 추천 패널:
+  - `Nginx QPS`
+  - `Nginx 5xx/s`
+  - `Spring 5xx Ratio`
+  - `Spring P95 Latency (ms)`
+  - `Hikari Pending Connections`
+  - `Hikari Acquire Latency (ms)`
+  - `Hikari Connection Timeout/s`
+  - `Container Restart Events (15m)`
+
+추천 캡처 조합:
+
+1. `Spring P95 Latency (ms)` + `Nginx 5xx/s`
+2. `Hikari Pending Connections` + `Hikari Acquire Latency (ms)`
+3. `Hikari Connection Timeout/s` + `Container Restart Events (15m)`
+
+### 2. Infra / RDS / ALB
+
+- 대시보드 파일: [`infra-v2-rds-alb.json`](/Users/cho/IdeaProjects/6-team-team6-cloud/monitoring/server/configs/grafana/dashboards/infra-v2-rds-alb.json)
+- 추천 패널:
+  - `ALB Ingress RPS`
+  - `ALB Target 5xx/s`
+  - `Hikari Active %`
+  - `Hikari Pending Connections`
+  - `Hikari Connection Timeout/s`
+  - `Hikari Acquire Latency (ms)`
+
+추천 캡처 조합:
+
+1. `ALB Ingress RPS` + `ALB Target 5xx/s`
+2. `Hikari Active %` + `Hikari Pending Connections`
+3. `Hikari Connection Timeout/s` + `Hikari Acquire Latency (ms)`
+
+## Prometheus 기준 확인할 메트릭
+
+Prometheus Explore에서 직접 확인할 때는 아래 메트릭을 우선 본다.
+
+- `http_server_requests_seconds_bucket`
+- `http_server_requests_seconds_count`
+- `hikaricp_connections_pending`
+- `hikaricp_connections_timeout_total`
+- `hikaricp_connections_acquire_seconds_sum`
+- `hikaricp_connections_acquire_seconds_count`
+- `aws_applicationelb_httpcode_target_5_xx_count_sum`
+- `aws_applicationelb_request_count_sum`
+
+## 캡처 타이밍
+
+가능하면 아래 4시점을 각각 캡처한다.
+
+1. toxic 주입 전 baseline
+2. `300ms` toxic 주입 직후
+3. 응답 시간 상승이 관측된 시점
+4. toxic cleanup 후
