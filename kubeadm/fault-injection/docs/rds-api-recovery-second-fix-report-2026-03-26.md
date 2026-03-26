@@ -10,6 +10,11 @@
 
 ## 한눈에 보는 결론
 
+출발점이 된 원래 문제는 두 단계였다.
+
+- `RDS 1.5s latency` 주입 시 `/actuator/health`를 함께 보던 `startup/readiness/liveness`가 모두 흔들리면서 pod 재시작, unready, Pending이 발생했다.
+- 1차 개선으로 이 `probe/scheduler 붕괴`는 줄였지만, `GET /groups/{groupId}/posts`는 여전히 hot state에서 `200 32.025387`, cleanup 뒤 첫 recovery poll에서 `8s timeout`을 보여 `API recovery gap`이 남았다.
+
 2차 개선은 `남아 있던 API recovery gap`을 실제로 줄였다.
 
 - 1차 개선 후에는 `RDS 1.5s latency` 중 hot state API가 `200 32.025387`, cleanup 뒤 첫 recovery poll도 `8s timeout`이었다. [`rds-fault-injection-recovery-comparison-2026-03-26.md`](/Users/cho/IdeaProjects/6-team-team6-cloud/kubeadm/fault-injection/docs/rds-fault-injection-recovery-comparison-2026-03-26.md)
@@ -20,7 +25,7 @@
 
 ## 무엇을 바꿨는가
 
-2차 개선은 `요청 경로 자체`를 줄이는 데 집중했다.
+2차 개선은 `요청 경로 자체`를 줄이는 데 집중했다. 이유는 1차 개선이 이미 `probe/scheduler 붕괴`는 줄였지만, 실제 비즈니스 API는 여전히 느린 DB 경로를 오래 붙잡고 있었기 때문이다.
 
 1. 첫 페이지 추천 경로를 끌 수 있는 설정을 추가했다.
 2. fault injection 실험 배포에서는 `POST_FEED_FIRST_PAGE_RECOMMENDATION_ENABLED=false`로 첫 페이지 추천 경로를 끄도록 했다.
@@ -65,6 +70,16 @@
 즉 이번 2차 검증은 `post list code path`는 타지만, 데이터량은 매우 작은 제어 조건이다.
 
 ## 결과
+
+### 0. 왜 2차 개선이 필요했는가
+
+2차 개선의 직접 배경은 1차 개선 이후에도 아래 현상이 남아 있었기 때문이다.
+
+- pod/scheduler/HPA는 빠르게 안정화됨
+- 그러나 `GET /groups/21/posts`는 hot state에서 `200 32.025387`
+- cleanup 뒤 첫 recovery poll도 `8s timeout`
+
+즉 `인프라 레벨 복구`와 `사용자 요청 복구` 사이에 큰 간극이 있었다.
 
 ### 1. baseline under load
 

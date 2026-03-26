@@ -23,6 +23,21 @@
 - [`13-toxic-cleanup.json`](/Users/cho/IdeaProjects/6-team-team6-cloud/kubeadm/fault-injection/evidence/2026-03-26-rds-api-recovery-second-patch/13-toxic-cleanup.json)
 - [`15-final-check.json`](/Users/cho/IdeaProjects/6-team-team6-cloud/kubeadm/fault-injection/evidence/2026-03-26-rds-api-recovery-second-patch/15-final-check.json)
 
+## 원래 문제
+
+이 작업의 출발점은 아래 장애 전파였다.
+
+1. `RDS latency` 주입 시 `/actuator/health`가 느려졌다.
+2. 같은 경로를 보던 `startup/readiness/liveness`가 모두 `timeoutSeconds=1`에 걸렸다.
+3. 새 pod는 기동 완료가 늦어지고, 기존 pod는 unready 또는 재시작됐다.
+4. 동시에 `requests.cpu=750m`와 topology spread 제약 때문에 일부 replica는 `Pending`에 머물렀다.
+5. 1차 개선으로 이 `probe/scheduler 붕괴`는 줄였지만, `GET /groups/{groupId}/posts`는 cleanup 뒤에도 수십 초~수분 recovery gap이 남았다.
+
+즉 문제는 두 단계였다.
+
+- 1단계: `probe/scheduler/HPA` 전파
+- 2단계: `비즈니스 API recovery gap`
+
 ## 이미 적용된 변경
 
 ### 클러스터/배포
