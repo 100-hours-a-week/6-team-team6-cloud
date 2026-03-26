@@ -1,0 +1,22 @@
+2026-03-26T01:16:05Z
+running (0m30.9s), 002/051 VUs, 1541 complete and 0 interrupted iterations
+list_api   [   9% ] 002/051 VUs  0m31.0s/6m0s  50.00 iters/s
+
+running (0m31.9s), 002/051 VUs, 1591 complete and 0 interrupted iterations
+list_api   [   9% ] 002/051 VUs  0m32.0s/6m0s  50.00 iters/s
+
+running (0m32.9s), 002/051 VUs, 1641 complete and 0 interrupted iterations
+list_api   [   9% ] 002/051 VUs  0m33.0s/6m0s  50.00 iters/s
+
+running (0m33.9s), 003/051 VUs, 1690 complete and 0 interrupted iterations
+list_api   [   9% ] 003/051 VUs  0m34.0s/6m0s  50.00 iters/s
+
+running (0m34.9s), 002/051 VUs, 1741 complete and 0 interrupted iterations
+list_api   [  10% ] 002/051 VUs  0m35.0s/6m0s  50.00 iters/s
+
+running (0m35.9s), 002/051 VUs, 1791 complete and 0 interrupted iterations
+list_api   [  10% ] 002/051 VUs  0m36.0s/6m0s  50.00 iters/s
+
+running (0m36.9s), 003/051 VUs, 1840 complete and 0 interrupted iterations
+list_api   [  10% ] 003/051 VUs  0m37.0s/6m0s  50.00 iters/s
+GET /groups/11/posts code=200 total=1.708725

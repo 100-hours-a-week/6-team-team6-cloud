@@ -293,6 +293,30 @@ variable "rds_fault_injection_datasource_url" {
   default     = ""
 }
 
+variable "rds_fault_injection_db_connection_timeout_ms" {
+  description = "Hikari connection timeout applied to the Spring deployment during RDS fault injection"
+  type        = number
+  default     = 3000
+}
+
+variable "rds_fault_injection_db_validation_timeout_ms" {
+  description = "Hikari validation timeout applied to the Spring deployment during RDS fault injection"
+  type        = number
+  default     = 1000
+}
+
+variable "rds_fault_injection_db_initialization_fail_timeout_ms" {
+  description = "Hikari initialization fail timeout applied to the Spring deployment during RDS fault injection"
+  type        = number
+  default     = 1
+}
+
+variable "rds_fault_injection_first_page_recommendation_enabled" {
+  description = "Whether the first page recommendation path stays enabled during the RDS fault injection experiment"
+  type        = bool
+  default     = false
+}
+
 variable "rds_fault_injection_probe_liveness_path" {
   description = "Liveness probe path applied by the resilience patch"
   type        = string

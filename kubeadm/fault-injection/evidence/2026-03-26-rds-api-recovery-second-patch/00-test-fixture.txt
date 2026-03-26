@@ -1,0 +1,5 @@
+LOGIN_ID=fi1774487721
+GROUP_ID=11
+JOIN={"userId":32}
+GROUP={"groupId":11}
+POST={"code":"SERVER01"}

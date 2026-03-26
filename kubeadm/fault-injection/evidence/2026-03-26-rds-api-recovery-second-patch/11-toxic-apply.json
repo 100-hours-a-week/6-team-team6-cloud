@@ -1,0 +1,5 @@
+[
+    "Success",
+    "pod \"fi-toxic\" deleted\npod/fi-toxic created\n\n{\"attributes\":{\"latency\":1500,\"jitter\":150},\"name\":\"latency_downstream\",\"type\":\"latency\",\"stream\":\"downstream\",\"toxicity\":1}\n{\"name\":\"rds-upstream\",\"listen\":\"[::]:3306\",\"upstream\":\"billage-dev-v2-mysql.cpigi2qskxj3.ap-northeast-2.rds.amazonaws.com:3306\",\"enabled\":true,\"Logger\":{},\"toxics\":[{\"attributes\":{\"latency\":1500,\"jitter\":150},\"name\":\"latency_downstream\",\"type\":\"latency\",\"stream\":\"downstream\",\"toxicity\":1}]}",
+    ""
+]

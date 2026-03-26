@@ -13,6 +13,10 @@ PROBE_TIMEOUT_SECONDS="${probe_timeout_seconds}"
 STARTUP_FAILURE_THRESHOLD="${startup_failure_threshold}"
 REQUEST_CPU="${request_cpu}"
 HPA_SCALE_DOWN_WINDOW="${hpa_scale_down_window}"
+DB_CONNECTION_TIMEOUT_MS="${db_connection_timeout_ms}"
+DB_VALIDATION_TIMEOUT_MS="${db_validation_timeout_ms}"
+DB_INITIALIZATION_FAIL_TIMEOUT_MS="${db_initialization_fail_timeout_ms}"
+FIRST_PAGE_RECOMMENDATION_ENABLED="${first_page_recommendation_enabled}"
 
 wait_for_api() {
   until kubectl version --request-timeout=5s >/dev/null 2>&1; do
@@ -42,7 +46,11 @@ patch_deployment() {
               \"env\": [
                 {\"name\": \"MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED\", \"value\": \"true\"},
                 {\"name\": \"MANAGEMENT_HEALTH_LIVENESSSTATE_ENABLED\", \"value\": \"true\"},
-                {\"name\": \"MANAGEMENT_HEALTH_READINESSSTATE_ENABLED\", \"value\": \"true\"}
+                {\"name\": \"MANAGEMENT_HEALTH_READINESSSTATE_ENABLED\", \"value\": \"true\"},
+                {\"name\": \"DB_CONNECTION_TIMEOUT_MS\", \"value\": \"$${DB_CONNECTION_TIMEOUT_MS}\"},
+                {\"name\": \"DB_VALIDATION_TIMEOUT_MS\", \"value\": \"$${DB_VALIDATION_TIMEOUT_MS}\"},
+                {\"name\": \"DB_INITIALIZATION_FAIL_TIMEOUT_MS\", \"value\": \"$${DB_INITIALIZATION_FAIL_TIMEOUT_MS}\"},
+                {\"name\": \"POST_FEED_FIRST_PAGE_RECOMMENDATION_ENABLED\", \"value\": \"$${FIRST_PAGE_RECOMMENDATION_ENABLED}\"}
               ],
               \"resources\": {
                 \"requests\": {
@@ -111,7 +119,7 @@ patch_hpa() {
 }
 
 print_summary() {
-  kubectl get deployment "$${DEPLOYMENT_NAME}" -n "$${NAMESPACE}" -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{" requests.cpu="}{.resources.requests.cpu}{" liveness="}{.livenessProbe.httpGet.path}{" readiness="}{.readinessProbe.httpGet.path}{" startup="}{.startupProbe.httpGet.path}{" timeout="}{.livenessProbe.timeoutSeconds}{"\n"}{end}'
+  kubectl get deployment "$${DEPLOYMENT_NAME}" -n "$${NAMESPACE}" -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{" requests.cpu="}{.resources.requests.cpu}{" liveness="}{.livenessProbe.httpGet.path}{" readiness="}{.readinessProbe.httpGet.path}{" startup="}{.startupProbe.httpGet.path}{" timeout="}{.livenessProbe.timeoutSeconds}{" dbConnectionTimeout="}{range .env[?(@.name=="DB_CONNECTION_TIMEOUT_MS")]}{.value}{end}{" recommendationEnabled="}{range .env[?(@.name=="POST_FEED_FIRST_PAGE_RECOMMENDATION_ENABLED")]}{.value}{end}{"\n"}{end}'
   kubectl get hpa "$${DEPLOYMENT_NAME}" -n "$${NAMESPACE}" -o jsonpath='scaleDownWindow={.spec.behavior.scaleDown.stabilizationWindowSeconds}{"\n"}'
 }
 

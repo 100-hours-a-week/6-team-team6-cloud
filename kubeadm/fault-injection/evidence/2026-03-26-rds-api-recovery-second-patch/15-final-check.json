@@ -1,0 +1,5 @@
+[
+    "Success",
+    "2026-03-26T01:29:45Z\nNAME          REFERENCE                TARGETS   MINPODS   MAXPODS   REPLICAS   AGE\nspring-boot   Deployment/spring-boot   4%/70%    3         10        3          5d20h\nNAME          READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS    IMAGES                                                                     SELECTOR\nspring-boot   3/3     3            3           5d20h   spring-boot   988319239270.dkr.ecr.ap-northeast-2.amazonaws.com/billage-be:kube_latest   app=spring-boot,app.kubernetes.io/instance=spring-boot\nNAME                           READY   STATUS    RESTARTS   AGE   IP               NODE                          NOMINATED NODE   READINESS GATES\nspring-boot-5b979767d7-8xhzn   1/1     Running   0          29m   192.168.138.37   billage-kubeadm-prod-app-02   <none>           <none>\nspring-boot-5b979767d7-kgsbd   1/1     Running   0          30m   192.168.75.234   billage-kubeadm-prod-app-01   <none>           <none>\nspring-boot-5b979767d7-vq57x   1/1     Running   0          29m   192.168.44.44    billage-kubeadm-prod-app-04   <none>           <none>\n",
+    ""
+]

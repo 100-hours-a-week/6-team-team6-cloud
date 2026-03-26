@@ -136,6 +136,13 @@ cleanup 이후 관측은 두 단계로 나뉘었다.
 3. Hikari/Tomcat 메트릭 계측 추가
 4. readiness는 회복됐어도 API가 느린 구간을 드러낼 synthetic check 별도 도입
 
+## 후속 결과
+
+이 문서는 `1차 개선`까지를 직접 비교한 결과다. 이후 `첫 페이지 추천 경로 비활성화 + Hikari timeout 명시`를 적용한 2차 개선 결과는 별도 문서에 정리했다.
+
+- 2차 결과 보고서: [`rds-api-recovery-second-fix-report-2026-03-26.md`](/Users/cho/IdeaProjects/6-team-team6-cloud/kubeadm/fault-injection/docs/rds-api-recovery-second-fix-report-2026-03-26.md)
+- 이어받기 문서: [`rds-fault-injection-continuation-2026-03-26.md`](/Users/cho/IdeaProjects/6-team-team6-cloud/kubeadm/fault-injection/docs/rds-fault-injection-continuation-2026-03-26.md)
+
 ## 읽는 순서 추천
 
 빠르게 파악하려면 아래 순서로 보면 된다.

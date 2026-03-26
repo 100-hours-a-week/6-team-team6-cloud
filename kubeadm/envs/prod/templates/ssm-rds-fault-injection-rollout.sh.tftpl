@@ -8,6 +8,10 @@ DEPLOYMENT_NAME="${deployment_name}"
 CONTAINER_NAME="${container_name}"
 IMAGE="${image}"
 DATASOURCE_URL="${datasource_url}"
+DB_CONNECTION_TIMEOUT_MS="${db_connection_timeout_ms}"
+DB_VALIDATION_TIMEOUT_MS="${db_validation_timeout_ms}"
+DB_INITIALIZATION_FAIL_TIMEOUT_MS="${db_initialization_fail_timeout_ms}"
+FIRST_PAGE_RECOMMENDATION_ENABLED="${first_page_recommendation_enabled}"
 
 wait_for_api() {
   until kubectl version --request-timeout=5s >/dev/null 2>&1; do
@@ -32,7 +36,11 @@ rollout_kube_latest() {
 
   kubectl set env deployment/"$${DEPLOYMENT_NAME}" \
     -n "$${NAMESPACE}" \
-    DEV_DB_URL="$${DATASOURCE_URL}"
+    DEV_DB_URL="$${DATASOURCE_URL}" \
+    DB_CONNECTION_TIMEOUT_MS="$${DB_CONNECTION_TIMEOUT_MS}" \
+    DB_VALIDATION_TIMEOUT_MS="$${DB_VALIDATION_TIMEOUT_MS}" \
+    DB_INITIALIZATION_FAIL_TIMEOUT_MS="$${DB_INITIALIZATION_FAIL_TIMEOUT_MS}" \
+    POST_FEED_FIRST_PAGE_RECOMMENDATION_ENABLED="$${FIRST_PAGE_RECOMMENDATION_ENABLED}"
 
   kubectl patch deployment "$${DEPLOYMENT_NAME}" -n "$${NAMESPACE}" --type='strategic' -p "{
     \"spec\": {
@@ -55,6 +63,10 @@ rollout_kube_latest() {
 print_summary() {
   echo "Rolled deployment $${DEPLOYMENT_NAME} in namespace $${NAMESPACE} to image $${IMAGE}"
   echo "Datasource override: $${DATASOURCE_URL}"
+  echo "DB connection timeout: $${DB_CONNECTION_TIMEOUT_MS}ms"
+  echo "DB validation timeout: $${DB_VALIDATION_TIMEOUT_MS}ms"
+  echo "DB initialization fail timeout: $${DB_INITIALIZATION_FAIL_TIMEOUT_MS}ms"
+  echo "First page recommendation enabled: $${FIRST_PAGE_RECOMMENDATION_ENABLED}"
 }
 
 wait_for_api
