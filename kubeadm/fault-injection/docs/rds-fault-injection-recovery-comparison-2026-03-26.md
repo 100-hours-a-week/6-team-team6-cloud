@@ -8,6 +8,27 @@
 
 이 문서는 튜닝 항목을 나열하거나 설정 변경 자체를 성과처럼 포장하는 데 목적이 없다. 오직 `같은 부하`, `같은 지연`, `같은 복구 기준`에서 얼마나 달라졌는지를 비교한다.
 
+## 한눈에 보는 결론
+
+이번 개선은 `실제로 효과가 있었다.` 다만 효과가 나타난 지점은 `pod/scheduler 복구`와 `API 응답 복구`가 서로 달랐다.
+
+- 개선 전에는 `1.5s` 지연을 제거한 뒤 `249초`가 지나도 `READY 4/7`, `Pending 3`, `desiredReplicas 7` 상태에서 빠져나오지 못했다.
+- 개선 후에는 같은 조건에서 `pod 관점 복구`가 `38초 이내`로 줄었다.
+- 개선 후에도 `비즈니스 API`는 cleanup 직후 한동안 느렸고, `완전한 API 복구`는 `118초 초과, 156초 이내`였다.
+
+즉, 이번 패치는 `probe/scheduler 붕괴를 막는 1차 방어선`으로는 성공했고, 다음 과제는 `API 처리 경로 자체의 회복 시간 단축`이다.
+
+## 핵심 수치 비교
+
+| 비교 항목 | 개선 전 | 개선 후 | 해석 |
+| --- | --- | --- | --- |
+| hot state replica | `7` | `3` | 개선 전엔 HPA와 scheduler가 함께 흔들렸고, 개선 후엔 replica 수가 안정적으로 유지됐다. |
+| hot state ready pod | `4/7` | `3/3` | 개선 전엔 일부 pod가 Pending/재시작으로 빠졌고, 개선 후엔 all ready를 유지했다. |
+| hot state Pending | `3` | `0` | `requests.cpu 750m -> 300m` 조정과 probe 분리의 효과가 scheduler 적체 감소로 이어졌다. |
+| hot state API | `200`, 이후 장기 적체 | `200 32.0s` | 개선 후에도 비즈니스 API는 느렸지만, 장애가 pod 붕괴 대신 응답 지연으로 국소화됐다. |
+| cleanup 후 pod 복구 | `249초 초과`에도 미복구 | `38초 이내` | 이번 개선의 가장 큰 정량 효과다. |
+| cleanup 후 API 완전 복구 | `249초 초과`에도 완전 복구 미달 | `118초 초과, 156초 이내` | API 회복도 빨라졌지만, pod 복구만큼 짧아지지는 않았다. |
+
 ## 체크리스트
 
 - [x] 기준선 환경 상태 확인
@@ -30,7 +51,7 @@
   - `HPA desiredReplicas=3`
   - 대상 API `HTTP 200`
 
-## 기준선 측정
+## 개선 전 기준선
 
 기준선은 기존 설정 그대로 측정했다.
 
@@ -47,7 +68,7 @@
 
 따라서 개선 전 기준선의 복구 시간은 `249초 초과`로 기록했다.
 
-## 개선 내용
+## 무엇을 바꿨는가
 
 개선은 `DB 지연이 probe 실패와 scheduler 적체로 전파되는 경로`를 줄이는 데 집중했다.
 
@@ -61,7 +82,7 @@
 
 적용은 Terraform이 생성한 SSM 문서 `billage-kubeadm-prod-rds-fault-injection-resilience-patch`로 수행했다. 적용 로그에는 rollout 완료와 최종 spec이 남아 있다. [`13-resilience-patch-apply.json`](/Users/cho/IdeaProjects/6-team-team6-cloud/kubeadm/fault-injection/evidence/2026-03-26-rds-recovery-comparison/13-resilience-patch-apply.json)
 
-## 개선 후 측정
+## 개선 후 재실험
 
 개선 후 steady state는 아래 조건에서 시작했다.
 
@@ -93,26 +114,6 @@ cleanup 이후 관측은 두 단계로 나뉘었다.
 - `pod 관점 복구`: `38초 이내`
 - `API 관점 완전 복구`: `118초 초과, 156초 이내`
 
-## 전후 비교
-
-| 항목 | 개선 전 | 개선 후 |
-| --- | --- | --- |
-| probe 경로 | `/actuator/health` 단일 경로 | `liveness/readiness` 분리 |
-| probe timeout | `1s` | `5s` |
-| CPU request | `750m` | `300m` |
-| HPA scaleDown window | `300s` | `60s` |
-| hot state pod 상태 | `REPLICAS 7`, `READY 4/7`, `Pending 3` | `REPLICAS 3`, `READY 3/3`, `Pending 0` |
-| hot state API | `200`이나 복구 후에도 적체 지속 | `200 32.0s`로 느리지만 pod 상태는 유지 |
-| cleanup 후 pod 복구 | `249초 초과`에도 미복구 | `38초 이내` |
-| cleanup 후 API 복구 | `249초 초과`에도 완전 복구 미달 | `156초 이내` |
-
-핵심 차이는 두 가지다.
-
-1. 개선 전에는 `DB 지연 -> health 지연 -> probe 실패 -> restart/scale-out -> Pending 장기화` 경로가 열려 있었다.
-2. 개선 후에는 `DB 지연 -> 비즈니스 API 느려짐`은 남았지만, `pod 수`와 `scheduler 상태`는 훨씬 빨리 정상화됐다.
-
-다만 개선 후에도 `deployment ready`와 `실제 API 회복` 사이에 최대 `약 2분`의 간극이 남았다. 이번 실험은 이 간극이 다음 개선 포인트라는 점까지 드러냈다.
-
 ## 해석
 
 이번 패치는 `무너지지 않게 하는 1차 방어선`으로는 효과가 있었다.
@@ -134,6 +135,15 @@ cleanup 이후 관측은 두 단계로 나뉘었다.
 2. DB 호출 retry 정책 상한 설정
 3. Hikari/Tomcat 메트릭 계측 추가
 4. readiness는 회복됐어도 API가 느린 구간을 드러낼 synthetic check 별도 도입
+
+## 읽는 순서 추천
+
+빠르게 파악하려면 아래 순서로 보면 된다.
+
+1. 이 문서의 `한눈에 보는 결론`
+2. 이 문서의 `핵심 수치 비교`
+3. 기준선 증거: [`10-baseline-state-after-cleanup.txt`](/Users/cho/IdeaProjects/6-team-team6-cloud/kubeadm/fault-injection/evidence/2026-03-26-rds-recovery-comparison/10-baseline-state-after-cleanup.txt), [`12-baseline-state-poll3.txt`](/Users/cho/IdeaProjects/6-team-team6-cloud/kubeadm/fault-injection/evidence/2026-03-26-rds-recovery-comparison/12-baseline-state-poll3.txt)
+4. 개선 후 증거: [`15-postfix-toxic-apply-and-hot-state.json`](/Users/cho/IdeaProjects/6-team-team6-cloud/kubeadm/fault-injection/evidence/2026-03-26-rds-recovery-comparison/15-postfix-toxic-apply-and-hot-state.json), [`17-postfix-recovery-poll-01.json`](/Users/cho/IdeaProjects/6-team-team6-cloud/kubeadm/fault-injection/evidence/2026-03-26-rds-recovery-comparison/17-postfix-recovery-poll-01.json), [`18-postfix-api-and-toxic-check.json`](/Users/cho/IdeaProjects/6-team-team6-cloud/kubeadm/fault-injection/evidence/2026-03-26-rds-recovery-comparison/18-postfix-api-and-toxic-check.json)
 
 ## 증거 파일
 
