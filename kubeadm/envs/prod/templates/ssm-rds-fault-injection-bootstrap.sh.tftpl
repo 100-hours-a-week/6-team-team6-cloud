@@ -1,0 +1,267 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export KUBECONFIG=/etc/kubernetes/admin.conf
+
+NAMESPACE="${namespace}"
+TOXIPROXY_IMAGE="${toxiproxy_image}"
+PROXY_NAME="${proxy_name}"
+LISTEN_PORT="${listen_port}"
+UPSTREAM_HOST="${upstream_host}"
+UPSTREAM_PORT="${upstream_port}"
+RDS_EGRESS_CIDR="${rds_egress_cidr}"
+SPRING_SERVICE_NAME="${spring_service_name}"
+SPRING_SERVICE_PORT="${spring_service_port}"
+PROBE_PATH="${probe_path}"
+ADMIN_PORT="8474"
+DEPLOYMENT_NAME="toxiproxy-rds"
+SERVICE_NAME="toxiproxy-rds"
+K6_CONFIGMAP_NAME="k6-rds-fault-injection-script"
+PORT_FORWARD_PID=""
+
+cleanup() {
+  if [ -n "$${PORT_FORWARD_PID}" ] && kill -0 "$${PORT_FORWARD_PID}" >/dev/null 2>&1; then
+    kill "$${PORT_FORWARD_PID}" >/dev/null 2>&1 || true
+    wait "$${PORT_FORWARD_PID}" >/dev/null 2>&1 || true
+  fi
+}
+
+trap cleanup EXIT
+
+wait_for_api() {
+  until kubectl version --request-timeout=5s >/dev/null 2>&1; do
+    echo "waiting for kube-apiserver"
+    sleep 5
+  done
+}
+
+validate_inputs() {
+  if [ -z "$${UPSTREAM_HOST}" ]; then
+    echo "rds_fault_injection_upstream_host is empty; set the RDS endpoint before running this SSM document" >&2
+    exit 1
+  fi
+}
+
+apply_resources() {
+  cat >/opt/kubeadm/rendered/rds-fault-injection.yaml <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: $${DEPLOYMENT_NAME}
+  namespace: $${NAMESPACE}
+  labels:
+    app: $${DEPLOYMENT_NAME}
+    platform.billage.io/component: fault-injection
+    fault-injection.billage.io/type: rds
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: $${DEPLOYMENT_NAME}
+  template:
+    metadata:
+      labels:
+        app: $${DEPLOYMENT_NAME}
+        platform.billage.io/component: fault-injection
+        fault-injection.billage.io/type: rds
+    spec:
+      nodeSelector:
+        workload-plane: app
+      containers:
+        - name: toxiproxy
+          image: $${TOXIPROXY_IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: admin
+              containerPort: $${ADMIN_PORT}
+            - name: mysql
+              containerPort: $${LISTEN_PORT}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /version
+              port: admin
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /version
+              port: admin
+            initialDelaySeconds: 10
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: $${SERVICE_NAME}
+  namespace: $${NAMESPACE}
+  labels:
+    app: $${DEPLOYMENT_NAME}
+    fault-injection.billage.io/type: rds
+spec:
+  selector:
+    app: $${DEPLOYMENT_NAME}
+  ports:
+    - name: admin
+      port: $${ADMIN_PORT}
+      targetPort: admin
+    - name: mysql
+      port: $${LISTEN_PORT}
+      targetPort: mysql
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-to-rds-toxiproxy
+  namespace: $${NAMESPACE}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: $${DEPLOYMENT_NAME}
+      ports:
+        - port: $${LISTEN_PORT}
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-rds-toxiproxy-ingress
+  namespace: $${NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app: $${DEPLOYMENT_NAME}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - port: $${LISTEN_PORT}
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-rds-toxiproxy-dns-egress
+  namespace: $${NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app: $${DEPLOYMENT_NAME}
+  policyTypes:
+    - Egress
+  egress:
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-rds-toxiproxy-upstream-egress
+  namespace: $${NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app: $${DEPLOYMENT_NAME}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: $${RDS_EGRESS_CIDR}
+      ports:
+        - port: $${UPSTREAM_PORT}
+          protocol: TCP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: $${K6_CONFIGMAP_NAME}
+  namespace: $${NAMESPACE}
+data:
+  rds-fault-injection.js: |
+    import http from 'k6/http';
+    import { check, sleep } from 'k6';
+
+    export const options = {
+      vus: 20,
+      duration: '20m',
+      thresholds: {
+        http_req_failed: ['rate<0.05'],
+        http_req_duration: ['p(95)<1000'],
+      },
+    };
+
+    const BASE_URL = 'http://$${SPRING_SERVICE_NAME}.$${NAMESPACE}.svc.cluster.local:$${SPRING_SERVICE_PORT}';
+    const PROBE_PATH = '$${PROBE_PATH}';
+
+    export default function () {
+      const res = http.get(`$${BASE_URL}$${PROBE_PATH}`, { timeout: '5s' });
+      check(res, {
+        'status is 200': (r) => r.status === 200,
+      });
+      sleep(1);
+    }
+EOF
+
+  kubectl apply -f /opt/kubeadm/rendered/rds-fault-injection.yaml
+  kubectl rollout status deployment/$${DEPLOYMENT_NAME} -n "$${NAMESPACE}" --timeout=5m
+}
+
+configure_proxy() {
+  kubectl -n "$${NAMESPACE}" port-forward svc/$${SERVICE_NAME} "$${ADMIN_PORT}:$${ADMIN_PORT}" >/tmp/rds-toxiproxy-port-forward.log 2>&1 &
+  PORT_FORWARD_PID="$!"
+
+  for _ in $(seq 1 30); do
+    if curl -fsS "http://127.0.0.1:$${ADMIN_PORT}/version" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 2
+  done
+
+  curl -fsS "http://127.0.0.1:$${ADMIN_PORT}/version" >/dev/null
+  curl -fsS -X DELETE "http://127.0.0.1:$${ADMIN_PORT}/proxies/$${PROXY_NAME}" >/dev/null 2>&1 || true
+  curl -fsS \
+    -H "Content-Type: application/json" \
+    -X POST \
+    "http://127.0.0.1:$${ADMIN_PORT}/proxies" \
+    -d "{\"name\":\"$${PROXY_NAME}\",\"listen\":\"0.0.0.0:$${LISTEN_PORT}\",\"upstream\":\"$${UPSTREAM_HOST}:$${UPSTREAM_PORT}\"}" >/dev/null
+}
+
+print_next_steps() {
+  cat <<EOF
+RDS fault injection support resources are ready.
+
+- Namespace: $${NAMESPACE}
+- Toxiproxy service: $${SERVICE_NAME}.$${NAMESPACE}.svc.cluster.local:$${LISTEN_PORT}
+- Upstream: $${UPSTREAM_HOST}:$${UPSTREAM_PORT}
+- Sample k6 script ConfigMap: $${K6_CONFIGMAP_NAME}
+
+Next steps:
+1. Point Spring datasource to $${SERVICE_NAME}.$${NAMESPACE}.svc.cluster.local:$${LISTEN_PORT}
+2. Use Toxiproxy admin API to add latency/loss toxics
+3. Run the sample k6 script or your service-specific load test
+EOF
+}
+
+wait_for_api
+validate_inputs
+apply_resources
+configure_proxy
+print_next_steps

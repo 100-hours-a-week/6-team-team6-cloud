@@ -1,0 +1,43 @@
+{
+    "CommandInvocations": [
+        {
+            "CommandId": "e78a5ca1-d868-449f-a75b-eabdc8c6a1b3",
+            "InstanceId": "i-09a68ff072a74da85",
+            "InstanceName": "billage-kubeadm-prod-cp-01.village.internal",
+            "Comment": "force toxiproxy cleanup with timeout",
+            "DocumentName": "AWS-RunShellScript",
+            "DocumentVersion": "$DEFAULT",
+            "RequestedDateTime": "2026-03-26T02:52:46.143000+09:00",
+            "Status": "Success",
+            "StatusDetails": "Success",
+            "StandardOutputUrl": "",
+            "StandardErrorUrl": "",
+            "CommandPlugins": [
+                {
+                    "Name": "aws:runShellScript",
+                    "Status": "Success",
+                    "StatusDetails": "Success",
+                    "ResponseCode": 0,
+                    "ResponseStartDateTime": "2026-03-26T02:52:46.264000+09:00",
+                    "ResponseFinishDateTime": "2026-03-26T02:52:56.270000+09:00",
+                    "Output": "",
+                    "StandardOutputUrl": "",
+                    "StandardErrorUrl": "",
+                    "OutputS3Region": "ap-northeast-2",
+                    "OutputS3BucketName": "",
+                    "OutputS3KeyPrefix": ""
+                }
+            ],
+            "ServiceRole": "",
+            "NotificationConfig": {
+                "NotificationArn": "",
+                "NotificationEvents": [],
+                "NotificationType": ""
+            },
+            "CloudWatchOutputConfig": {
+                "CloudWatchLogGroupName": "",
+                "CloudWatchOutputEnabled": false
+            }
+        }
+    ]
+}

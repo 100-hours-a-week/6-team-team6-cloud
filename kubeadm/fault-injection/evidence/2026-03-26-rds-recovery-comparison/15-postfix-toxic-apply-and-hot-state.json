@@ -1,0 +1,43 @@
+{
+    "CommandInvocations": [
+        {
+            "CommandId": "b18bef0a-adba-45a5-aa79-c1717136d4dc",
+            "InstanceId": "i-09a68ff072a74da85",
+            "InstanceName": "billage-kubeadm-prod-cp-01.village.internal",
+            "Comment": "postfix 1500ms toxic apply and hot state manual",
+            "DocumentName": "AWS-RunShellScript",
+            "DocumentVersion": "$DEFAULT",
+            "RequestedDateTime": "2026-03-26T02:48:36.077000+09:00",
+            "Status": "Success",
+            "StatusDetails": "Success",
+            "StandardOutputUrl": "",
+            "StandardErrorUrl": "",
+            "CommandPlugins": [
+                {
+                    "Name": "aws:runShellScript",
+                    "Status": "Success",
+                    "StatusDetails": "Success",
+                    "ResponseCode": 0,
+                    "ResponseStartDateTime": "2026-03-26T02:48:36.193000+09:00",
+                    "ResponseFinishDateTime": "2026-03-26T02:51:08.650000+09:00",
+                    "Output": "2026-03-25T17:48:36Z\n{\"attributes\":{\"latency\":1500,\"jitter\":150},\"name\":\"latency_downstream\",\"type\":\"latency\",\"stream\":\"downstream\",\"toxicity\":1}2026-03-25T17:50:06Z\nNAME          REFERENCE                TARGETS   MINPODS   MAXPODS   REPLICAS   AGE\nspring-boot   Deployment/spring-boot   9%/70%    3         10        3          5d12h\nNAME          READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS    IMAGES                                                                     SELECTOR\nspring-boot   3/3     3            3           5d12h   spring-boot   988319239270.dkr.ecr.ap-northeast-2.amazonaws.com/billage-be:kube_latest   app=spring-boot,app.kubernetes.io/instance=spring-boot\nNAME                          READY   STATUS    RESTARTS      AGE   IP               NODE                          NOMINATED NODE   READINESS GATES\nspring-boot-c7c956978-b8tgg   1/1     Running   2 (12m ago)   13m   192.168.235.52   billage-kubeadm-prod-app-03   <none>           <none>\nspring-boot-c7c956978-p6vb9   1/1     Running   0             11m   192.168.138.36   billage-kubeadm-prod-app-02   <none>           <none>\nspring-boot-c7c956978-wzz28   1/1     Running   0             11m   192.168.235.53   billage-kubeadm-prod-app-03   <none>           <none>\nrunning (39m27.9s), 000/200 VUs, 109504 complete and 0 interrupted iterations\nlist_api   [  99% ] 000/200 VUs  39m27.9s/40m0s  50.00 iters/s\n\nrunning (39m28.9s), 000/200 VUs, 109554 complete and 0 interrupted iterations\nlist_api   [  99% ] 000/200 VUs  39m28.9s/40m0s  50.00 iters/s\n\nrunning (39m29.9s), 000/200 VUs, 109604 complete and 0 interrupted iterations\nlist_api   [  99% ] 000/200 VUs  39m29.9s/40m0s  50.00 iters/s\n\nrunning (39m30.9s), 000/200 VUs, 109654 complete and 0 interrupted iterations\nlist_api   [  99% ] 000/200 VUs  39m30.9s/40m0s  50.00 iters/s\n\nrunning (39m31.9s), 000/200 VUs, 109704 complete and 0 interrupted iterations\nlist_api   [  99% ] 000/200 VUs  39m31.9s/40m0s  50.00 iters/s\n\nrunning (39m32.9s), 000/200 VUs, 109754 complete and 0 interrupted iterations\nlist_api   [  99% ] 000/200 VUs  39m32.9s/40m0s  50.00 iters/s\n\nrunning (39m33.9s), 000/200 VUs, 109804 complete and 0 interrupted iterations\nlist_api   [  99% ] 000/200 VUs  39m33.9s/40m0s  50.00 iters/s\n200 32.025387\n",
+                    "StandardOutputUrl": "",
+                    "StandardErrorUrl": "",
+                    "OutputS3Region": "ap-northeast-2",
+                    "OutputS3BucketName": "",
+                    "OutputS3KeyPrefix": ""
+                }
+            ],
+            "ServiceRole": "",
+            "NotificationConfig": {
+                "NotificationArn": "",
+                "NotificationEvents": [],
+                "NotificationType": ""
+            },
+            "CloudWatchOutputConfig": {
+                "CloudWatchLogGroupName": "",
+                "CloudWatchOutputEnabled": false
+            }
+        }
+    ]
+}

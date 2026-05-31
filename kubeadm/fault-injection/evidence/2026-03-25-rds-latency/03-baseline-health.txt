@@ -1,0 +1,14 @@
+Measured pod:
+- spring-boot-55b4d4d878-rxw4k
+
+Command shape:
+- kubectl port-forward pod/spring-boot-55b4d4d878-rxw4k 18080:8080
+- curl http://127.0.0.1:18080/actuator/health
+
+Output:
+Forwarding from 127.0.0.1:18080 -> 8080
+Forwarding from [::1]:18080 -> 8080
+probe code=200 total=0.018092
+probe code=200 total=0.012583
+probe code=200 total=0.010602
+

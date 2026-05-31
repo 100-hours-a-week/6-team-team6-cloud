@@ -1,0 +1,22 @@
+{
+    "CommandId": "0f986454-ab4d-489b-9da0-3899ae786f08",
+    "InstanceId": "i-09a68ff072a74da85",
+    "Comment": "postfix final recovery snapshot",
+    "DocumentName": "AWS-RunShellScript",
+    "DocumentVersion": "$DEFAULT",
+    "PluginName": "aws:runShellScript",
+    "ResponseCode": 0,
+    "ExecutionStartDateTime": "2026-03-25T17:53:15.216Z",
+    "ExecutionElapsedTime": "PT18.33S",
+    "ExecutionEndDateTime": "2026-03-25T17:53:33.216Z",
+    "Status": "Success",
+    "StatusDetails": "Success",
+    "StandardOutputContent": "2026-03-25T17:53:15Z\nNAME          REFERENCE                TARGETS   MINPODS   MAXPODS   REPLICAS   AGE\nspring-boot   Deployment/spring-boot   5%/70%    3         10        3          5d12h\nNAME          READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS    IMAGES                                                                     SELECTOR\nspring-boot   3/3     3            3           5d12h   spring-boot   988319239270.dkr.ecr.ap-northeast-2.amazonaws.com/billage-be:kube_latest   app=spring-boot,app.kubernetes.io/instance=spring-boot\nNAME                          READY   STATUS    RESTARTS      AGE   IP               NODE                          NOMINATED NODE   READINESS GATES\nspring-boot-c7c956978-b8tgg   1/1     Running   2 (15m ago)   15m   192.168.235.52   billage-kubeadm-prod-app-03   <none>           <none>\nspring-boot-c7c956978-p6vb9   1/1     Running   0             14m   192.168.138.36   billage-kubeadm-prod-app-02   <none>           <none>\nspring-boot-c7c956978-wzz28   1/1     Running   0             14m   192.168.235.53   billage-kubeadm-prod-app-03   <none>           <none>\n     http_reqs..................: 111108  46.294943/s\n     iteration_duration.........: avg=386.7ms min=676.52µs med=2.41ms  max=50s     p(90)=3.17ms  p(95)=3.83ms  \n     iterations.................: 111108  46.294943/s\n     vus........................: 0       min=0       max=200 \n     vus_max....................: 200     min=50      max=200 \n\n\nrunning (40m00.0s), 000/200 VUs, 111108 complete and 0 interrupted iterations\nlist_api ✓ [ 100% ] 000/200 VUs  40m0s  50.00 iters/s\ntime=\"2026-03-25T17:51:03Z\" level=error msg=\"thresholds on metrics 'http_req_failed' have been crossed\"\n000 8.001249\n",
+    "StandardOutputUrl": "",
+    "StandardErrorContent": "curl: (28) Operation timed out after 8001 milliseconds with 0 bytes received\ncommand terminated with exit code 28\n",
+    "StandardErrorUrl": "",
+    "CloudWatchOutputConfig": {
+        "CloudWatchLogGroupName": "",
+        "CloudWatchOutputEnabled": false
+    }
+}

@@ -1,0 +1,5 @@
+{
+    "Status": "Success",
+    "Stdout": "2026-03-25T17:28:28Z\n{\"attributes\":{\"latency\":1500,\"jitter\":150},\"name\":\"latency_downstream\",\"type\":\"latency\",\"stream\":\"downstream\",\"toxicity\":1}",
+    "Stderr": ""
+}

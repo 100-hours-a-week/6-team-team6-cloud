@@ -1,0 +1,21 @@
+Observed after experiment:
+
+NAME          REFERENCE                TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+spring-boot   Deployment/spring-boot   4%/70%    3         10        9          5d3h
+
+Key HPA behavior:
+- Scale Up policies:
+  - Percent 100 / 15s
+  - Pods 4 / 15s
+- Scale Down stabilization window:
+  - 300 seconds
+
+Observed deployment state during cooldown:
+- spring-boot desired replicas temporarily increased to 9
+- available replicas stayed at 4
+- additional replicas were Pending because node capacity was insufficient
+
+Interpretation:
+- fault injection 자체 외에 HPA 동작도 함께 관측됐다.
+- 즉시 원복되지 않은 이유는 HPA cooldown이며, 추후 포트폴리오에서는 "부하 spike와 autoscaling 부수효과"로 설명 가능하다.
+

@@ -1,0 +1,22 @@
+{
+    "CommandId": "58199c3c-661b-4402-b545-02420fe25768",
+    "InstanceId": "i-09a68ff072a74da85",
+    "Comment": "postfix steady state snapshot manual2",
+    "DocumentName": "AWS-RunShellScript",
+    "DocumentVersion": "$DEFAULT",
+    "PluginName": "aws:runShellScript",
+    "ResponseCode": 0,
+    "ExecutionStartDateTime": "2026-03-25T17:47:33.609Z",
+    "ExecutionElapsedTime": "PT40.909S",
+    "ExecutionEndDateTime": "2026-03-25T17:48:13.609Z",
+    "Status": "Success",
+    "StatusDetails": "Success",
+    "StandardOutputContent": "2026-03-25T17:47:33Z\nNAME          REFERENCE                TARGETS   MINPODS   MAXPODS   REPLICAS   AGE\nspring-boot   Deployment/spring-boot   9%/70%    3         10        3          5d12h\nNAME          READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS    IMAGES                                                                     SELECTOR\nspring-boot   3/3     3            3           5d12h   spring-boot   988319239270.dkr.ecr.ap-northeast-2.amazonaws.com/billage-be:kube_latest   app=spring-boot,app.kubernetes.io/instance=spring-boot\nNAME                          READY   STATUS    RESTARTS        AGE     IP               NODE                          NOMINATED NODE   READINESS GATES\nspring-boot-c7c956978-b8tgg   1/1     Running   2 (9m49s ago)   10m     192.168.235.52   billage-kubeadm-prod-app-03   <none>           <none>\nspring-boot-c7c956978-p6vb9   1/1     Running   0               8m36s   192.168.138.36   billage-kubeadm-prod-app-02   <none>           <none>\nspring-boot-c7c956978-wzz28   1/1     Running   0               9m2s    192.168.235.53   billage-kubeadm-prod-app-03   <none>           <none>\nrunning (36m44.9s), 000/200 VUs, 101354 complete and 0 interrupted iterations\nlist_api   [  92% ] 000/200 VUs  36m44.9s/40m0s  50.00 iters/s\n\nrunning (36m45.9s), 000/200 VUs, 101404 complete and 0 interrupted iterations\nlist_api   [  92% ] 000/200 VUs  36m45.9s/40m0s  50.00 iters/s\n\nrunning (36m46.9s), 000/200 VUs, 101454 complete and 0 interrupted iterations\nlist_api   [  92% ] 000/200 VUs  36m46.9s/40m0s  50.00 iters/s\n\nrunning (36m47.9s), 000/200 VUs, 101504 complete and 0 interrupted iterations\nlist_api   [  92% ] 000/200 VUs  36m47.9s/40m0s  50.00 iters/s\n\nrunning (36m48.9s), 000/200 VUs, 101554 complete and 0 interrupted iterations\nlist_api   [  92% ] 000/200 VUs  36m48.9s/40m0s  50.00 iters/s\n\nrunning (36m49.9s), 000/200 VUs, 101604 complete and 0 interrupted iterations\nlist_api   [  92% ] 000/200 VUs  36m49.9s/40m0s  50.00 iters/s\n\nrunning (36m50.9s), 000/200 VUs, 101654 complete and 0 interrupted iterations\nlist_api   [  92% ] 000/200 VUs  36m50.9s/40m0s  50.00 iters/s\n{\"name\":\"rds-upstream\",\"listen\":\"[::]:3306\",\"upstream\":\"billage-dev-v2-mysql.cpigi2qskxj3.ap-northeast-2.rds.amazonaws.com:3306\",\"enabled\":true,\"Logger\":{},\"toxics\":[]}200 0.465252\n",
+    "StandardOutputUrl": "",
+    "StandardErrorContent": "",
+    "StandardErrorUrl": "",
+    "CloudWatchOutputConfig": {
+        "CloudWatchLogGroupName": "",
+        "CloudWatchOutputEnabled": false
+    }
+}
